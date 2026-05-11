@@ -8,6 +8,18 @@ LeadFlow AI is a full-stack lead management and outreach app built with:
 - Gemini for lead enrichment and email generation
 - Resend for sending emails
 
+## Challenge Fit
+
+LeadFlow AI matches the "AI lead generation" workflow challenge by covering the full journey from lead ingestion to AI-assisted outreach inside one CRM-style product.
+
+It supports:
+
+- importing leads from CSV or manual entry
+- automatically enriching CRM data with AI
+- generating intelligent prospect summaries
+- creating personalized cold email drafts
+- managing leads through a smart dashboard with analytics and activity tracking
+
 ## Overview
 
 LeadFlow AI helps you:
@@ -27,6 +39,57 @@ Default login credentials:
 - Password: `admin123`
 
 These values are configurable through the root `.env` file.
+
+## Workflow Architecture
+
+### Input -> Process -> Output
+
+```text
+Input
+  CSV upload or manual lead creation
+
+Process
+  Frontend captures lead data
+    ->
+  FastAPI backend validates and stores leads in Supabase
+    ->
+  Gemini enriches the lead with score, summary, company context, and tags
+    ->
+  Gemini generates a personalized cold email draft
+    ->
+  Backend stores email drafts and activity logs
+
+Output
+  Smart CRM dashboard with enriched leads, summaries, draft emails, pipeline status, and analytics
+```
+
+### System Architecture
+
+```text
+React + Vite Frontend
+  ->
+FastAPI API Layer
+  ->
+Service Layer
+  - Gemini enrichment
+  - Gemini prospect summaries
+  - Gemini cold email drafting
+  - Resend email delivery
+  ->
+Supabase
+  - leads
+  - emails
+  - activity
+```
+
+### Core AI Workflow
+
+1. A lead enters the system through CSV import or manual creation.
+2. The backend stores the lead and makes it available in the CRM dashboard.
+3. AI enrichment adds score, summary, tags, and company-related context.
+4. A personalized email draft is generated automatically for enriched leads.
+5. Users review, regenerate, copy, or send the draft from the Email page.
+6. Lead activity, email state, and dashboard metrics stay synced across the app.
 
 ## Project Structure
 
@@ -81,6 +144,12 @@ leadflow-ai/
 - saved drafts are reused when available
 - emails can be sent through Resend
 - send activity is stored for analytics and activity feeds
+
+### CRM Dashboard and Analytics
+
+- tracks lead status through table and kanban views
+- shows recent activity and operational metrics
+- reflects enrichment progress, outreach state, and pipeline movement
 
 ### Authentication
 
@@ -400,6 +469,27 @@ Optional CSV columns:
 Note:
 
 - the backend enforces the enriched-lead requirement for both draft generation and sending
+
+## Demo Guide
+
+If you are recording the 5-10 minute demo for the challenge, this is a strong flow:
+
+1. Show the project goal: AI-powered lead generation and CRM workflow.
+2. Import a CSV file with sample leads.
+3. Open the Leads page and show unenriched vs enriched lead states.
+4. Trigger AI enrichment for a lead and explain the score, summary, and tags.
+5. Open the Email page and show the generated personalized cold email draft.
+6. Show that drafts are saved and tied to enriched leads.
+7. Walk through the Dashboard / Analytics view to show CRM visibility.
+8. Briefly explain the architecture: React frontend, FastAPI backend, Gemini for AI, Supabase for persistence, Resend for delivery.
+
+## Why This Matches the Challenge
+
+- It starts with lead ingestion, not just email generation.
+- It uses AI for enrichment, summaries, and personalized outreach.
+- It persists and manages leads inside a CRM workflow.
+- It provides clear input -> process -> output architecture for review.
+- It is implemented as a public GitHub project and is demo-ready.
 
 ## API Notes
 
