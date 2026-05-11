@@ -254,13 +254,20 @@ export default function LeadsPage() {
       <AnimatePresence>
         {selected && (
           <motion.div
+            key={selected.id}
             initial={{ opacity: 0, x: 40, width: 0 }}
             animate={{ opacity: 1, x: 0, width: 380 }}
             exit={{ opacity: 0, x: 40, width: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className="hidden min-w-0 flex-col overflow-hidden border-l border-slate-200/50 bg-white/70 backdrop-blur-xl dark:border-slate-800/50 dark:bg-slate-900/70 lg:flex"
           >
-            <LeadDetail lead={selected} onClose={() => actions.selectLead(null)} onEnrich={handleEnrich} enriching={enriching} />
+            <LeadDetail
+              lead={selected}
+              onClose={() => actions.selectLead(null)}
+              onEnrich={handleEnrich}
+              onWriteEmail={(lead) => navigate(`/email?lead=${lead.id}`)}
+              enriching={enriching}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -276,14 +283,31 @@ export default function LeadsPage() {
   )
 }
 
-function LeadDetail({ lead, onClose, onEnrich, enriching }) {
+function LeadDetail({ lead, onClose, onEnrich, onWriteEmail, enriching }) {
   const { actions } = useLeads()
+  const { toast } = useToast()
   const [status, setStatus] = useState(lead.status)
   const [tab, setTab] = useState('overview')
+  const [notes, setNotes] = useState(lead.notes || '')
+  const [savingNotes, setSavingNotes] = useState(false)
 
   async function handleStatusChange(nextStatus) {
     setStatus(nextStatus)
     await actions.updateLead({ ...lead, status: nextStatus })
+  }
+
+  async function handleSaveNotes() {
+    if (savingNotes) return
+
+    setSavingNotes(true)
+    try {
+      await actions.updateLead({ id: lead.id, notes })
+      toast(`Saved notes for ${lead.name}`, 'success')
+    } catch (error) {
+      toast(error.message || 'Failed to save notes', 'error')
+    } finally {
+      setSavingNotes(false)
+    }
   }
 
   return (
@@ -405,10 +429,25 @@ function LeadDetail({ lead, onClose, onEnrich, enriching }) {
         )}
 
         {tab === 'notes' && (
-          <textarea
-            className="h-48 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-[13px] text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-            placeholder="Add notes about this lead..."
-          />
+          <div className="space-y-3">
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              className="h-48 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-[13px] text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              placeholder="Add notes about this lead..."
+            />
+            <div className="flex justify-end">
+              <motion.button
+                onClick={handleSaveNotes}
+                disabled={savingNotes}
+                className="rounded-xl bg-slate-900 px-3 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+                whileHover={!savingNotes ? { scale: 1.02 } : {}}
+                whileTap={!savingNotes ? { scale: 0.98 } : {}}
+              >
+                {savingNotes ? 'Saving...' : 'Save Notes'}
+              </motion.button>
+            </div>
+          </div>
         )}
       </div>
 
@@ -428,6 +467,7 @@ function LeadDetail({ lead, onClose, onEnrich, enriching }) {
           </span>
         </motion.button>
         <motion.button
+          onClick={() => onWriteEmail(lead)}
           className="flex-1 rounded-xl bg-violet-50 py-2 text-[12px] font-semibold text-violet-600 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}

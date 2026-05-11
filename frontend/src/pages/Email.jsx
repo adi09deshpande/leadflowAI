@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Sparkles, Copy, Check, RefreshCw, Send, ChevronDown, User, AlertTriangle, Zap } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import { useLeads } from '../store/leads'
 import { enrichLead, generateColdEmail, getSavedEmailDraft, sendGeneratedEmail } from '../services/gemini'
 import { cn } from '../lib/utils'
@@ -9,8 +10,10 @@ import { useToast } from '../components/ui/Toast'
 
 export default function EmailPage() {
   const { leads, actions } = useLeads()
+  const location = useLocation()
   const { toast } = useToast()
-  const [selectedLeadId, setSelectedLeadId] = useState(null)
+  const queryLeadId = new URLSearchParams(location.search).get('lead')
+  const [selectedLeadId, setSelectedLeadId] = useState(() => queryLeadId || null)
   const [email, setEmail] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
@@ -21,6 +24,8 @@ export default function EmailPage() {
   const [search, setSearch] = useState('')
   const activeLeadId = selectedLeadId && leads.some((lead) => lead.id === selectedLeadId)
     ? selectedLeadId
+    : queryLeadId && leads.some((lead) => lead.id === queryLeadId)
+      ? queryLeadId
     : leads[0]?.id ?? null
   const activeLead = leads.find((lead) => lead.id === activeLeadId) || null
 
