@@ -1,0 +1,63 @@
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.eslintcache
+frontend/*.tsbuildinfo
+
+# Python / backend
+backend/.venv/
+backend/venv/
+backend/env/
+backend/.python-version
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
+backend/build/
+backend/dist/
+backend/site/
+backend/*.egg-info/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+
+# Test, cache, and generated output
+coverage/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+*.tmp
+*.temp
+*.bak
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE and OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc local files
+*.zip
