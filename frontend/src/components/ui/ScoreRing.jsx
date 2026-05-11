@@ -1,11 +1,21 @@
 import { motion } from 'framer-motion'
 import { cn, SCORE_COLOR } from '../../lib/utils'
 
-export default function ScoreRing({ score, size = 40 }) {
+export default function ScoreRing({ score, size = 40, pending = false, pendingLabel = 'Not enriched' }) {
   const radius = (size - 6) / 2
   const circumference = 2 * Math.PI * radius
   const pct = Math.max(0, Math.min(100, score || 0))
   const dash = (pct / 100) * circumference
+
+  if (pending) {
+    return (
+      <div
+        className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+      >
+        {pendingLabel}
+      </div>
+    )
+  }
 
   return (
     <div className="relative" style={{ width: size, height: size }}>

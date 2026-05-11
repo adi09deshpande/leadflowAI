@@ -65,7 +65,7 @@ export default function EnrichPage() {
 
       try {
         const enrichedLead = await enrichLead(lead)
-        await actions.updateLead(enrichedLead)
+        actions.syncLead(enrichedLead)
         setResults((previous) => ({ ...previous, [id]: { status: 'done', steps: [0, 1, 2, 3] } }))
       } catch (error) {
         setResults((previous) => ({ ...previous, [id]: { status: 'failed', steps: [] } }))

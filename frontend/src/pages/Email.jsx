@@ -19,17 +19,22 @@ export default function EmailPage() {
   const [copied, setCopied] = useState(false)
   const [showLeadPicker, setShowLeadPicker] = useState(false)
   const [search, setSearch] = useState('')
-  const activeLead = leads.find((lead) => lead.id === selectedLeadId) || leads[0] || null
+  const activeLeadId = selectedLeadId && leads.some((lead) => lead.id === selectedLeadId)
+    ? selectedLeadId
+    : leads[0]?.id ?? null
+  const activeLead = leads.find((lead) => lead.id === activeLeadId) || null
 
   useEffect(() => {
     let cancelled = false
 
     async function loadDraft() {
-      if (!activeLead) {
+      if (!activeLeadId) {
         setEmail(null)
+        setLoadingDraft(false)
         return
       }
-      if (!activeLead.enriched) {
+      const lead = leads.find((item) => item.id === activeLeadId) || null
+      if (!lead?.enriched) {
         setEmail(null)
         setLoadingDraft(false)
         return
@@ -37,12 +42,12 @@ export default function EmailPage() {
 
       setLoadingDraft(true)
       try {
-        const draft = await getSavedEmailDraft(activeLead)
+        const draft = await getSavedEmailDraft(lead)
         if (!cancelled) {
           if (draft) {
             setEmail(draft)
           } else {
-            const generatedDraft = await generateColdEmail(activeLead)
+            const generatedDraft = await generateColdEmail(lead)
             if (!cancelled) {
               setEmail(generatedDraft || null)
             }
@@ -65,7 +70,7 @@ export default function EmailPage() {
     return () => {
       cancelled = true
     }
-  }, [activeLead, toast])
+  }, [activeLeadId, leads, toast])
 
   const filteredLeads = leads.filter(l =>
     l.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -93,8 +98,9 @@ export default function EmailPage() {
     setEnrichingLead(true)
     try {
       const enriched = await enrichLead(activeLead)
-      await actions.updateLead(enriched)
+      actions.syncLead(enriched)
       setSelectedLeadId(enriched.id)
+      setEmail(null)
       toast(`Enriched ${enriched.name} and prepared a draft`, 'ai')
     } catch (error) {
       toast(error.message || 'Failed to enrich lead', 'error')

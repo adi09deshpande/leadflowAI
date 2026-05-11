@@ -49,7 +49,7 @@ export default function LeadsPage() {
     setEnriching(lead.id)
     try {
       const enrichedLead = await enrichLead(lead)
-      await actions.updateLead(enrichedLead)
+      actions.syncLead(enrichedLead)
       toast(`Enriched ${lead.name}`, 'ai')
     } catch (error) {
       toast(error.message || 'Failed to enrich lead', 'error')
@@ -185,7 +185,13 @@ export default function LeadsPage() {
                         <div className="text-[11px] text-slate-400">{lead.title}</div>
                       </td>
                       <td className="px-4 py-3"><StatusBadge status={lead.status} /></td>
-                      <td className="px-4 py-3"><ScoreRing score={lead.score} size={34} /></td>
+                      <td className="px-4 py-3">
+                        <ScoreRing
+                          score={lead.score}
+                          size={34}
+                          pending={!lead.enriched}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[12px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                           {lead.source}
@@ -295,7 +301,11 @@ function LeadDetail({ lead, onClose, onEnrich, enriching }) {
         </h2>
         <p className="mt-0.5 text-[13px] text-slate-500">{lead.title} - {lead.company}</p>
         <div className="mt-3 flex items-center gap-2">
-          <ScoreRing score={lead.score} size={36} />
+          <ScoreRing
+            score={lead.score}
+            size={36}
+            pending={!lead.enriched}
+          />
           <select
             value={status}
             onChange={(event) => handleStatusChange(event.target.value)}

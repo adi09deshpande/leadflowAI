@@ -20,6 +20,52 @@ def get_model():
         ) from exc
 
 
+def _map_gemini_exception(exc: Exception) -> HTTPException:
+    message = str(exc)
+    normalized = message.lower()
+
+    if "api key not valid" in normalized or "invalid api key" in normalized:
+        return HTTPException(
+            status_code=401,
+            detail="Gemini API key is invalid. Update GEMINI_API_KEY in .env and restart the backend.",
+        )
+
+    if (
+        "permission_denied" in normalized
+        or "permission denied" in normalized
+        or "access restricted" in normalized
+        or "denied access" in normalized
+        or "project has been denied access" in normalized
+    ):
+        return HTTPException(
+            status_code=403,
+            detail=(
+                "Gemini project/key does not have access. Check that the project is imported in Google AI Studio, "
+                "Gemini is allowed for your account/region, and billing is enabled if required."
+            ),
+        )
+
+    if "failed_precondition" in normalized:
+        return HTTPException(
+            status_code=400,
+            detail="Gemini is not enabled for this project plan/region. Enable billing or use a supported project/account.",
+        )
+
+    if "resource_exhausted" in normalized or "quota" in normalized or "429" in normalized:
+        return HTTPException(
+            status_code=429,
+            detail="Gemini quota exceeded. Use a project with available quota or wait for the quota reset.",
+        )
+
+    if "503" in normalized or "unavailable" in normalized:
+        return HTTPException(
+            status_code=503,
+            detail="Gemini is temporarily unavailable. Please retry in a moment.",
+        )
+
+    return HTTPException(status_code=502, detail=f"Gemini request failed: {message}")
+
+
 def _generate(prompt: str, *, json_mode: bool = False) -> str:
     try:
         kwargs = {"generation_config": {"response_mime_type": "application/json"}} if json_mode else {}
@@ -30,7 +76,7 @@ def _generate(prompt: str, *, json_mode: bool = False) -> str:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}") from exc
+        raise _map_gemini_exception(exc) from exc
 
 
 def _extract_json_object(text: str) -> str:

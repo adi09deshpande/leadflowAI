@@ -8,10 +8,12 @@ import { cn } from '../../lib/utils'
 let _addToast = null
 
 export function useToast() {
+  const toast = useCallback((msg, type = 'success', duration = 3500) => {
+    if (_addToast) _addToast({ msg, type, duration, id: Date.now() })
+  }, [])
+
   return {
-    toast: (msg, type = 'success', duration = 3500) => {
-      if (_addToast) _addToast({ msg, type, duration, id: Date.now() })
-    }
+    toast,
   }
 }
 

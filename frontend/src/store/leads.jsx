@@ -17,7 +17,15 @@ const initialState = {
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_LEADS':
-      return { ...state, leads: action.leads, loading: false, error: null }
+      return {
+        ...state,
+        leads: action.leads,
+        loading: false,
+        error: null,
+        selected: state.selected
+          ? action.leads.find((lead) => lead.id === state.selected.id) || null
+          : null,
+      }
     case 'SET_LOADING':
       return { ...state, loading: action.loading }
     case 'SET_ERROR':
@@ -25,6 +33,7 @@ function reducer(state, action) {
     case 'ADD_LEAD':
       return { ...state, leads: [action.lead, ...state.leads] }
     case 'UPDATE_LEAD':
+    case 'SYNC_LEAD':
       return {
         ...state,
         leads: state.leads.map((lead) => (lead.id === action.lead.id ? { ...lead, ...action.lead } : lead)),
@@ -84,6 +93,10 @@ export function LeadsProvider({ children }) {
       const updatedLead = await api.updateLead(id, payload)
       dispatch({ type: 'UPDATE_LEAD', lead: updatedLead })
       return updatedLead
+    }, []),
+    syncLead: useCallback((lead) => {
+      dispatch({ type: 'SYNC_LEAD', lead })
+      return lead
     }, []),
     deleteLead: useCallback(async (id) => {
       await api.deleteLead(id)
