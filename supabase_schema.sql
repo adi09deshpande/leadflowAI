@@ -46,13 +46,38 @@ for each row execute procedure public.set_updated_at();
 create table if not exists public.emails (
   id uuid primary key default gen_random_uuid(),
   lead_id uuid not null references public.leads(id) on delete cascade,
+  sequence_step integer not null default 1
+    check (sequence_step >= 1 and sequence_step <= 4),
+  sequence_label text not null default 'Intro',
   subject text not null,
   body text not null,
   tone text not null default 'professional',
+  provider_message_id text,
   sent boolean not null default false,
   sent_at timestamptz,
+  delivered boolean not null default false,
+  delivered_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table public.emails
+  add column if not exists sequence_step integer not null default 1
+    check (sequence_step >= 1 and sequence_step <= 4),
+  add column if not exists sequence_label text not null default 'Intro',
+  add column if not exists provider_message_id text,
+  add column if not exists delivered boolean not null default false,
+  add column if not exists delivered_at timestamptz;
+
+-- Cleanup old tracking columns from earlier versions. The app now tracks only sent and delivered.
+alter table public.emails
+  drop column if exists opened,
+  drop column if exists opened_at,
+  drop column if exists clicked,
+  drop column if exists clicked_at,
+  drop column if exists replied,
+  drop column if exists replied_at,
+  drop column if exists bounced,
+  drop column if exists bounced_at;
 
 create table if not exists public.activity (
   id uuid primary key default gen_random_uuid(),
@@ -67,6 +92,8 @@ create index if not exists leads_score_idx on public.leads(score desc);
 create index if not exists leads_created_at_idx on public.leads(created_at desc);
 create index if not exists leads_email_idx on public.leads(email);
 create index if not exists emails_lead_id_idx on public.emails(lead_id);
+create index if not exists emails_sequence_idx on public.emails(lead_id, sequence_step, created_at desc);
+create index if not exists emails_provider_message_id_idx on public.emails(provider_message_id);
 create index if not exists activity_lead_id_idx on public.activity(lead_id);
 
 alter table public.leads enable row level security;

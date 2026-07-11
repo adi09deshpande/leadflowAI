@@ -3,10 +3,31 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Sparkles, Copy, Check, RefreshCw, Send, ChevronDown, User, AlertTriangle, Zap } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useLeads } from '../store/leads'
-import { enrichLead, generateColdEmail, getSavedEmailDraft, sendGeneratedEmail } from '../services/gemini'
+import { enrichLead, generateColdEmailSequence, getSavedEmailSequence, sendGeneratedEmail } from '../services/gemini'
 import { cn } from '../lib/utils'
 import Avatar from '../components/ui/Avatar'
 import { useToast } from '../components/ui/Toast'
+
+const SEQUENCE_STEPS = [
+  { step: 1, label: 'Intro' },
+  { step: 2, label: 'Follow-up' },
+  { step: 3, label: 'Value proof' },
+  { step: 4, label: 'Breakup' },
+]
+
+const EMAIL_STATUSES = [
+  { field: 'sent', label: 'Sent', icon: Send, activeClass: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300' },
+  { field: 'delivered', label: 'Delivered', icon: Check, activeClass: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300' },
+]
+
+function hasCompleteSequence(emails) {
+  const steps = new Set((emails || []).map((email) => Number(email.sequence_step || 1)))
+  return SEQUENCE_STEPS.every((step) => steps.has(step.step))
+}
+
+function getVisibleStatuses(email) {
+  return EMAIL_STATUSES.filter((status) => Boolean(email?.[status.field]))
+}
 
 export default function EmailPage() {
   const { leads, actions } = useLeads()
@@ -14,7 +35,8 @@ export default function EmailPage() {
   const { toast } = useToast()
   const queryLeadId = new URLSearchParams(location.search).get('lead')
   const [selectedLeadId, setSelectedLeadId] = useState(() => queryLeadId || null)
-  const [email, setEmail] = useState(null)
+  const [sequence, setSequence] = useState([])
+  const [activeStep, setActiveStep] = useState(1)
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
   const [loadingDraft, setLoadingDraft] = useState(false)
@@ -28,40 +50,54 @@ export default function EmailPage() {
       ? queryLeadId
     : leads[0]?.id ?? null
   const activeLead = leads.find((lead) => lead.id === activeLeadId) || null
+  const email = sequence.find((item) => Number(item.sequence_step || 1) === activeStep) || null
+
+  function syncEmail(updatedEmail) {
+    setSequence((current) => {
+      const step = Number(updatedEmail.sequence_step || activeStep)
+      const exists = current.some((item) => Number(item.sequence_step || 1) === step)
+      const next = exists
+        ? current.map((item) => Number(item.sequence_step || 1) === step ? { ...item, ...updatedEmail } : item)
+        : [...current, updatedEmail]
+      return next.sort((a, b) => Number(a.sequence_step || 1) - Number(b.sequence_step || 1))
+    })
+  }
 
   useEffect(() => {
     let cancelled = false
 
     async function loadDraft() {
       if (!activeLeadId) {
-        setEmail(null)
+        setSequence([])
         setLoadingDraft(false)
         return
       }
       const lead = leads.find((item) => item.id === activeLeadId) || null
       if (!lead?.enriched) {
-        setEmail(null)
+        setSequence([])
         setLoadingDraft(false)
         return
       }
 
       setLoadingDraft(true)
       try {
-        const draft = await getSavedEmailDraft(lead)
+        const savedSequence = await getSavedEmailSequence(lead)
         if (!cancelled) {
-          if (draft) {
-            setEmail(draft)
+          if (hasCompleteSequence(savedSequence)) {
+            setSequence(savedSequence)
+            setActiveStep(Number(savedSequence[0]?.sequence_step || 1))
           } else {
-            const generatedDraft = await generateColdEmail(lead)
+            const generatedDraft = await generateColdEmailSequence(lead)
             if (!cancelled) {
-              setEmail(generatedDraft || null)
+              setSequence(generatedDraft || [])
+              setActiveStep(1)
             }
           }
         }
       } catch (error) {
         if (!cancelled) {
-          setEmail(null)
-          toast(error.message || 'Failed to load saved draft', 'error')
+          setSequence([])
+          toast(error.message || 'Failed to load saved sequence', 'error')
         }
       } finally {
         if (!cancelled) {
@@ -77,6 +113,32 @@ export default function EmailPage() {
     }
   }, [activeLeadId, leads, toast])
 
+  useEffect(() => {
+    if (!activeLead?.enriched) return
+    const needsDeliveryRefresh = sequence.some((item) => item.sent && !item.delivered)
+    if (!needsDeliveryRefresh) return
+
+    let cancelled = false
+    const refreshSequence = async () => {
+      try {
+        const latestSequence = await getSavedEmailSequence(activeLead)
+        if (!cancelled && hasCompleteSequence(latestSequence)) {
+          setSequence(latestSequence)
+        }
+      } catch {
+        // Keep the existing UI state; the next poll or page visit can recover.
+      }
+    }
+
+    const intervalId = window.setInterval(refreshSequence, 4000)
+    refreshSequence()
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [activeLead?.id, activeLead?.enriched, sequence])
+
   const filteredLeads = leads.filter(l =>
     l.name.toLowerCase().includes(search.toLowerCase()) ||
     l.company.toLowerCase().includes(search.toLowerCase())
@@ -85,11 +147,12 @@ export default function EmailPage() {
   async function generate() {
     if (!activeLead) return
     setGenerating(true)
-    setEmail(null)
+    setSequence([])
     try {
-      const result = await generateColdEmail(activeLead)
-      setEmail(result)
-      toast(`Email generated for ${activeLead.name}`, 'ai')
+      const result = await generateColdEmailSequence(activeLead)
+      setSequence(result)
+      setActiveStep(1)
+      toast(`Email sequence generated for ${activeLead.name}`, 'ai')
     } catch (error) {
       toast(error.message || 'Failed to generate email', 'error')
     } finally {
@@ -105,7 +168,7 @@ export default function EmailPage() {
       const enriched = await enrichLead(activeLead)
       actions.syncLead(enriched)
       setSelectedLeadId(enriched.id)
-      setEmail(null)
+      setSequence([])
       toast(`Enriched ${enriched.name} and prepared a draft`, 'ai')
     } catch (error) {
       toast(error.message || 'Failed to enrich lead', 'error')
@@ -136,9 +199,9 @@ export default function EmailPage() {
     setSending(true)
     try {
       const sentEmail = await sendGeneratedEmail(activeLead, email)
-      setEmail(sentEmail)
+      syncEmail(sentEmail)
       await actions.reload()
-      toast(`Email sent to ${activeLead.name}`, 'success', 5000)
+      toast(`${email.sequence_label || 'Email'} sent to ${activeLead.name}`, 'success', 5000)
     } catch (error) {
       await copyEmailDraft()
       toast(error.message || 'Failed to send email. Draft copied to clipboard.', 'error', 5000)
@@ -151,7 +214,7 @@ export default function EmailPage() {
     <div className="p-6 max-w-6xl mx-auto">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
         <h1 className="text-xl font-bold text-slate-800 dark:text-slate-200">AI Email Generator</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Generate personalized cold emails powered by Gemini AI</p>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Generate a four-step outreach sequence and track sent/delivered status</p>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
@@ -285,7 +348,7 @@ export default function EmailPage() {
                 <div className="w-3 h-3 rounded-full bg-red-400" />
                 <div className="w-3 h-3 rounded-full bg-amber-400" />
                 <div className="w-3 h-3 rounded-full bg-emerald-400" />
-                <span className="ml-2 text-[12px] text-slate-400 font-mono">cold-email.txt</span>
+                <span className="ml-2 text-[12px] text-slate-400 font-mono">outreach-sequence.txt</span>
               </div>
               {email && (
                 <div className="flex items-center gap-2">
@@ -295,7 +358,7 @@ export default function EmailPage() {
                       className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] transition-colors"
                       whileHover={{ scale: 1.05 }}
                     >
-                      <RefreshCw size={11} /> Regenerate
+                      <RefreshCw size={11} /> Regenerate Sequence
                     </motion.button>
                   )}
                   <motion.button
@@ -310,6 +373,48 @@ export default function EmailPage() {
             </div>
 
             <div className="p-6 h-full">
+              {sequence.length > 0 && (
+                <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {SEQUENCE_STEPS.map((step) => {
+                    const stepEmail = sequence.find((item) => Number(item.sequence_step || 1) === step.step)
+                    const active = activeStep === step.step
+                    const visibleStatuses = getVisibleStatuses(stepEmail)
+                    return (
+                      <button
+                        key={step.step}
+                        onClick={() => setActiveStep(step.step)}
+                        className={cn(
+                          'rounded-xl border px-3 py-2 text-left transition-colors',
+                          active
+                            ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+                            : 'border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
+                        )}
+                      >
+                        <div className="text-[10px] font-semibold uppercase">Email {step.step}</div>
+                        <div className="truncate text-[12px] font-semibold">{stepEmail?.sequence_label || step.label}</div>
+                        <div className="mt-1 flex min-h-[16px] flex-wrap gap-1">
+                          {visibleStatuses.length > 0 ? visibleStatuses.slice(0, 3).map((status) => (
+                            <span
+                              key={status.field}
+                              className={cn('rounded-full border px-1.5 py-0.5 text-[9px] font-semibold', status.activeClass)}
+                            >
+                              {status.label}
+                            </span>
+                          )) : (
+                            <span className="text-[10px] text-slate-400">Draft</span>
+                          )}
+                          {visibleStatuses.length > 3 && (
+                            <span className="rounded-full border border-slate-200 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                              +{visibleStatuses.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
               <AnimatePresence mode="wait">
                 {!email && !generating && !loadingDraft && (
                   <motion.div
@@ -324,12 +429,12 @@ export default function EmailPage() {
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
-                        {activeLead?.enriched ? 'Draft will appear here' : 'No draft available yet'}
+                        {activeLead?.enriched ? 'Sequence will appear here' : 'No sequence available yet'}
                       </p>
                       <p className="mt-1 text-xs text-slate-400">
                         {activeLead?.enriched
-                          ? 'Preparing or loading the latest draft for this lead.'
-                          : 'Enrich this lead first to create a high-quality draft automatically.'}
+                          ? 'Preparing or loading the latest four-step sequence for this lead.'
+                          : 'Enrich this lead first to create a high-quality sequence automatically.'}
                       </p>
                     </div>
                   </motion.div>
@@ -351,10 +456,10 @@ export default function EmailPage() {
                     </div>
                     <div className="text-center">
                       <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                        {loadingDraft ? 'Loading saved draft...' : 'Gemini AI is writing...'}
+                        {loadingDraft ? 'Loading saved sequence...' : 'Gemini AI is writing...'}
                       </p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {loadingDraft ? `Checking saved drafts for ${activeLead?.name}` : `Crafting a personalized email for ${activeLead?.name}`}
+                        {loadingDraft ? `Checking saved sequence for ${activeLead?.name}` : `Crafting a four-step sequence for ${activeLead?.name}`}
                       </p>
                     </div>
                     {/* Typing animation */}
@@ -399,11 +504,31 @@ export default function EmailPage() {
                       </div>
                     )}
 
+                    <div className="flex flex-wrap gap-2">
+                      {EMAIL_STATUSES.map((status) => {
+                        return (
+                          <span
+                            key={status.field}
+                            title={`${status.label} is updated automatically`}
+                            className={cn(
+                              'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold',
+                              email[status.field]
+                                ? status.activeClass
+                                : 'border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400'
+                            )}
+                          >
+                            <status.icon size={12} />
+                            {status.label}
+                          </span>
+                        )
+                      })}
+                    </div>
+
                     {/* Email body */}
                     <div className="relative">
                       <textarea
                         value={email.body}
-                        onChange={e => setEmail({ ...email, body: e.target.value })}
+                        onChange={e => syncEmail({ ...email, body: e.target.value })}
                         className="w-full bg-transparent text-[13px] text-slate-700 dark:text-slate-300 leading-relaxed outline-none resize-none min-h-[280px] font-mono"
                         style={{ fontFamily: 'inherit' }}
                       />
@@ -418,7 +543,7 @@ export default function EmailPage() {
                         whileHover={{ scale: 1.03 }}
                         whileTap={{ scale: 0.97 }}
                       >
-                        <Send size={13} /> {sending ? 'Sending...' : email.sent ? 'Send Again' : 'Send Email'}
+                        <Send size={13} /> {sending ? 'Sending...' : email.sent ? 'Send Again' : `Send Email ${activeStep}`}
                       </motion.button>
                       <button
                         onClick={copyEmail}

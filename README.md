@@ -17,7 +17,8 @@ It supports:
 - importing leads from CSV or manual entry
 - automatically enriching CRM data with AI
 - generating intelligent prospect summaries
-- creating personalized cold email drafts
+- creating personalized four-step cold email sequences
+- sending outreach through Resend with sent and delivered status tracking
 - managing leads through a smart dashboard with analytics and activity tracking
 
 ## Overview
@@ -27,9 +28,9 @@ LeadFlow AI helps you:
 - store and manage leads
 - import leads from CSV
 - enrich leads with AI
-- generate cold email drafts
-- send emails through Resend
-- track lead activity and analytics
+- generate four-step cold email sequences
+- send sequence emails through Resend
+- track lead activity, delivery status, and analytics
 
 The current app also includes a simple single-user login flow.
 
@@ -55,12 +56,12 @@ Process
     ->
   Gemini enriches the lead with score, summary, company context, and tags
     ->
-  Gemini generates a personalized cold email draft
+  Gemini generates a personalized four-step outreach sequence
     ->
-  Backend stores email drafts and activity logs
+  Backend stores sequence emails, send state, delivery state, and activity logs
 
 Output
-  Smart CRM dashboard with enriched leads, summaries, draft emails, pipeline status, and analytics
+  Smart CRM dashboard with enriched leads, summaries, outreach sequences, pipeline status, and analytics
 ```
 
 ### System Architecture
@@ -73,7 +74,7 @@ FastAPI API Layer
 Service Layer
   - Gemini enrichment
   - Gemini prospect summaries
-  - Gemini cold email drafting
+  - Gemini cold email sequence generation
   - Resend email delivery
   ->
 Supabase
@@ -87,9 +88,11 @@ Supabase
 1. A lead enters the system through CSV import or manual creation.
 2. The backend stores the lead and makes it available in the CRM dashboard.
 3. AI enrichment adds score, summary, tags, and company-related context.
-4. A personalized email draft is generated automatically for enriched leads.
-5. Users review, regenerate, copy, or send the draft from the Email page.
-6. Lead activity, email state, and dashboard metrics stay synced across the app.
+4. A personalized four-email sequence is generated automatically for enriched leads.
+5. Users review, regenerate, copy, and send each sequence step from the Email page.
+6. Sent status is stored immediately after Resend accepts an email.
+7. Delivered status is updated automatically through the Resend webhook.
+8. Lead activity, email state, and dashboard metrics stay synced across the app.
 
 ## Project Structure
 
@@ -136,20 +139,22 @@ leadflow-ai/
 
 - enriches leads using Gemini
 - stores generated summaries and enrichment fields
-- prepares email drafts automatically when a lead is enriched
+- prepares a four-step email sequence automatically when a lead is enriched
 
 ### Email Workflow
 
-- only enriched leads can be drafted and sent
-- saved drafts are reused when available
-- emails can be sent through Resend
-- send activity is stored for analytics and activity feeds
+- only enriched leads can have outreach sequences generated or sent
+- generated sequences contain four steps: intro, follow-up, value proof, and breakup
+- saved sequence emails are reused when available
+- individual sequence emails can be sent through Resend
+- sent status is saved immediately after Resend accepts the email
+- delivered status is updated by the Resend webhook and appears in the Email page without a manual reload
 
 ### CRM Dashboard and Analytics
 
 - tracks lead status through table and kanban views
 - shows recent activity and operational metrics
-- reflects enrichment progress, outreach state, and pipeline movement
+- reflects enrichment progress, sent and delivered email state, delivery rate, and pipeline movement
 
 ### Authentication
 
@@ -195,6 +200,7 @@ Before running the project locally, make sure you have:
 - a Supabase project
 - a Gemini API key
 - a Resend API key if you want email sending to work
+- a Resend webhook secret if you want delivered status to update automatically
 
 ## Environment Variables
 
@@ -222,6 +228,7 @@ SUPABASE_ACTIVITY_TABLE=activity
 RESEND_API_KEY=re_your_resend_api_key_here
 RESEND_FROM_EMAIL=LeadFlow AI <onboarding@yourdomain.com>
 RESEND_REPLY_TO=founder@yourdomain.com
+RESEND_WEBHOOK_SECRET=whsec_your_resend_webhook_secret_here
 
 # Optional: only needed if the frontend should call the backend directly
 VITE_API_BASE_URL=http://localhost:8000/api
@@ -245,7 +252,7 @@ Important variables:
   Backend token returned after login and used for protected API requests.
 
 - `GEMINI_API_KEY`
-  Required for AI enrichment and draft generation.
+  Required for AI enrichment and email sequence generation.
 
 - `GEMINI_MODEL`
   Gemini model used by the backend.
@@ -270,12 +277,15 @@ Important variables:
 - `RESEND_REPLY_TO`
   Default reply-to email.
 
+- `RESEND_WEBHOOK_SECRET`
+  Optional for sending, but required for automatic delivered tracking. Use the signing secret from your Resend webhook settings.
+
 - `VITE_API_BASE_URL`
   Optional. Useful when the frontend should call the backend directly instead of relying on a local proxy.
 
 ## Database Setup
 
-Run [supabase_schema.sql](/abs/path/d:/leadflow-ai/supabase_schema.sql:1) inside your Supabase SQL editor.
+Run [supabase_schema.sql](supabase_schema.sql) inside your Supabase SQL editor.
 
 This schema creates:
 
@@ -289,6 +299,10 @@ It also:
 - enables row level security
 - creates service-role-only policies
 - adds an `updated_at` trigger for leads
+- stores email sequence metadata with `sequence_step` and `sequence_label`
+- stores Resend delivery identifiers with `provider_message_id`
+- tracks only `sent` and `delivered` email states
+- removes older open, click, reply, and bounce tracking columns if they exist from a previous setup
 
 ## Start Here: Full Setup and Run Guide
 
@@ -315,6 +329,7 @@ Then replace all placeholder values with your real values, especially:
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
 - `RESEND_REPLY_TO`
+- `RESEND_WEBHOOK_SECRET`
 
 You can also change:
 
@@ -328,7 +343,7 @@ if you do not want to keep the default single-user login credentials.
 
 Open your Supabase project SQL editor and run:
 
-- [supabase_schema.sql](/abs/path/d:/leadflow-ai/supabase_schema.sql:1)
+- [supabase_schema.sql](supabase_schema.sql)
 
 This creates the required tables and policies used by the backend.
 
@@ -391,7 +406,8 @@ Frontend URL:
    - add leads manually
    - import leads from CSV
    - enrich leads with AI
-   - generate and send emails
+   - generate and send four-step email sequences
+   - send sequence emails and track sent/delivered status
    - view dashboard metrics and analytics
 
 ### Default Login
@@ -456,19 +472,26 @@ Optional CSV columns:
 1. Open Leads, Dashboard, or Enrich page
 2. Trigger AI enrichment for a lead
 3. The backend stores enrichment data
-4. A draft email is automatically prepared for that lead
+4. A four-step email sequence is automatically prepared for that lead
 
-### Generate and Send an Email
+### Generate and Send an Email Sequence
 
 1. Go to the Email page
 2. Select a lead
 3. If the lead is not enriched, enrich it first
-4. Review the generated draft
-5. Click `Send Email`
+4. Review the generated sequence tabs:
+   - Email 1: Intro
+   - Email 2: Follow-up
+   - Email 3: Value proof
+   - Email 4: Breakup
+5. Send the sequence step you want to test or use
+6. The Email page marks the message as sent after Resend accepts it
+7. The delivered badge updates automatically after Resend posts the delivered webhook event
 
 Note:
 
-- the backend enforces the enriched-lead requirement for both draft generation and sending
+- the backend enforces the enriched-lead requirement for both sequence generation and sending
+- Resend's free test sender is limited, so test with your own verified recipient or a verified sending domain
 
 ## Demo Guide
 
@@ -478,10 +501,11 @@ If you are recording the 5-10 minute demo for the challenge, this is a strong fl
 2. Import a CSV file with sample leads.
 3. Open the Leads page and show unenriched vs enriched lead states.
 4. Trigger AI enrichment for a lead and explain the score, summary, and tags.
-5. Open the Email page and show the generated personalized cold email draft.
-6. Show that drafts are saved and tied to enriched leads.
-7. Walk through the Dashboard / Analytics view to show CRM visibility.
-8. Briefly explain the architecture: React frontend, FastAPI backend, Gemini for AI, Supabase for persistence, Resend for delivery.
+5. Open the Email page and show the generated four-step cold email sequence.
+6. Show that sequence emails are saved, labeled, and tied to enriched leads.
+7. Send one email through Resend and show the sent/delivered badges.
+8. Walk through the Dashboard / Analytics view to show CRM visibility and delivery metrics.
+9. Briefly explain the architecture: React frontend, FastAPI backend, Gemini for AI, Supabase for persistence, Resend for delivery.
 
 ## Why This Matches the Challenge
 
@@ -506,6 +530,26 @@ Protected route groups:
 - `/api/stats`
 - `/api/activity`
 - `/api/analytics`
+
+Useful email routes:
+
+- `GET /api/ai/email/{lead_id}/sequence`
+- `POST /api/ai/email/{lead_id}/sequence`
+- `POST /api/ai/email/{lead_id}/send`
+
+Public webhook route:
+
+- `POST /api/webhooks/resend`
+
+Configure this URL in Resend to automatically update delivered status. Subscribe only to the `email.delivered` event for the current app. In production, set `RESEND_WEBHOOK_SECRET` from the Resend webhook settings so the backend can verify webhook signatures.
+
+For local testing, Resend cannot call `localhost:8000` directly. Run a tunnel such as:
+
+```bash
+ngrok http 8000
+```
+
+Then use the forwarded HTTPS URL plus `/api/webhooks/resend` as the Resend webhook endpoint.
 
 ## Command Reference
 
@@ -593,6 +637,19 @@ Check:
 - `RESEND_REPLY_TO`
 - your sender/domain setup in Resend
 
+### Delivered Badge Does Not Update
+
+Check:
+
+- the backend is running on port `8000`
+- the Resend webhook endpoint points to your public backend URL plus `/api/webhooks/resend`
+- local testing uses a tunnel such as `ngrok http 8000`
+- the webhook is subscribed to `email.delivered`
+- `RESEND_WEBHOOK_SECRET` matches the signing secret from Resend
+- the email row has a `provider_message_id` saved after sending
+
+The app intentionally tracks only sent and delivered. Open, click, reply, bounce, and complaint tracking were removed because they are not reliable for this free/local setup without a proper verified sending domain and additional provider support.
+
 ### CSV Import Fails
 
 Check:
@@ -611,6 +668,7 @@ Important limitations:
 
 - credentials are stored in `.env`
 - the app uses one shared backend token
+- the Resend webhook uses a shared signing secret from `.env`
 - this is not a production-grade multi-user auth system
 
 If you plan to deploy this publicly, you should replace it with a proper user auth system.

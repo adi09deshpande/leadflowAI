@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts'
-import { Mail, Target, Zap, DollarSign } from 'lucide-react'
+import { Mail, Target, Zap, DollarSign, Check } from 'lucide-react'
 import { api } from '../services/api'
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#64748b']
@@ -53,6 +53,7 @@ export default function Analytics() {
   }))
   const funnelData = analytics?.funnel_data || []
   const emailsByDay = analytics?.emails_by_day || []
+  const emailTracking = analytics?.email_tracking || []
 
   const cards = [
     { label: 'Avg Lead Score', value: kpis.avg_lead_score, suffix: '', icon: Target, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-500/10' },
@@ -60,10 +61,14 @@ export default function Analytics() {
     { label: 'Enrichment Rate', value: kpis.enrichment_rate, suffix: '%', icon: Zap, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-500/10' },
     { label: 'Pipeline Value', value: kpis.estimated_pipeline_value.toLocaleString(), prefix: '$', icon: DollarSign, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-500/10' },
   ]
+  const trackingCards = [
+    { label: 'Delivery Rate', value: kpis.delivery_rate || 0, icon: Check, color: 'text-violet-500' },
+  ]
 
   const hasAnalytics =
     monthlyTrend.some((entry) => entry.leads || entry.qualified || entry.emails || entry.converted) ||
-    sourceData.some((entry) => entry.count)
+    sourceData.some((entry) => entry.count) ||
+    emailTracking.some((entry) => entry.value)
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -89,6 +94,25 @@ export default function Analytics() {
             <div className="text-2xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">
               {card.prefix || ''}{card.value}{card.suffix || ''}
             </div>
+            <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{card.label}</div>
+          </motion.div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {trackingCards.map((card, index) => (
+          <motion.div
+            key={card.label}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 + index * 0.04 }}
+            className="glass-sm card-shadow rounded-2xl p-4"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <card.icon size={16} className={card.color} />
+              <span className="text-[11px] font-semibold text-slate-400">Tracking</span>
+            </div>
+            <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{card.value}%</div>
             <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{card.label}</div>
           </motion.div>
         ))}
@@ -223,6 +247,36 @@ export default function Analytics() {
               <Bar dataKey="count" fill="url(#barGrad)" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+          className="glass-sm card-shadow rounded-2xl p-5"
+        >
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">Email Tracking</h3>
+          <p className="mb-4 text-xs text-slate-600 dark:text-slate-400">Current status counts across sent sequence emails</p>
+          <div className="space-y-2">
+            {emailTracking.map((entry, index) => (
+              <div key={entry.name}>
+                <div className="mb-1 flex items-center justify-between text-[12px]">
+                  <span className="font-medium text-slate-600 dark:text-slate-400">{entry.name}</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-300">{entry.value}</span>
+                </div>
+                <div className="h-6 overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <motion.div
+                    className="h-full rounded-lg"
+                    style={{
+                      background: COLORS[index % COLORS.length],
+                      width: `${Math.min(100, ((entry.value || 0) / Math.max(emailTracking[0]?.value || 1, 1)) * 100)}%`,
+                    }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.min(100, ((entry.value || 0) / Math.max(emailTracking[0]?.value || 1, 1)) * 100)}%` }}
+                    transition={{ duration: 0.7, delay: 0.45 + index * 0.05, ease: 'easeOut' }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </motion.div>
       </div>
     </div>

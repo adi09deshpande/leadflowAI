@@ -146,6 +146,39 @@ def _parse_email_text(text: str, tone: str = "professional") -> dict:
     return {"subject": subject, "body": body, "tone": tone}
 
 
+def _coerce_sequence(data: dict) -> list[dict]:
+    raw_emails = data.get("emails") if isinstance(data, dict) else None
+    if not isinstance(raw_emails, list):
+        raise HTTPException(status_code=502, detail="Gemini did not return an email sequence")
+
+    labels = {
+        1: "Intro",
+        2: "Follow-up",
+        3: "Value proof",
+        4: "Breakup",
+    }
+    sequence = []
+    for index, item in enumerate(raw_emails[:4], start=1):
+        if not isinstance(item, dict):
+            continue
+        subject = str(item.get("subject") or "").strip()
+        body = str(item.get("body") or "").strip()
+        if subject and body:
+            sequence.append(
+                {
+                    "sequence_step": index,
+                    "sequence_label": item.get("sequence_label") or labels[index],
+                    "subject": subject,
+                    "body": body,
+                    "tone": "professional",
+                }
+            )
+
+    if len(sequence) != 4:
+        raise HTTPException(status_code=502, detail="Gemini returned an incomplete email sequence")
+    return sequence
+
+
 async def enrich_lead_with_ai(lead: dict) -> dict:
     prompt = f"""
 You are a B2B sales intelligence expert. Analyze this lead and provide enriched data.
@@ -221,6 +254,51 @@ Subject: <subject line>
 <email body>
 """
       return _parse_email_text(_generate(fallback_prompt), tone)
+
+
+async def generate_email_sequence(lead: dict, custom_context: str = "") -> list[dict]:
+    prompt = f"""
+Write a 4-email B2B outbound sequence for this lead.
+
+Lead facts:
+- First name: {lead.get('name')}
+- Role: {lead.get('title') or 'Decision maker'}
+- Company: {lead.get('company')}
+- Industry: {lead.get('industry') or 'Unknown'}
+- Company size: {lead.get('company_size') or 'Unknown'}
+- Summary: {lead.get('summary') or 'Unknown'}
+- Tags: {', '.join(lead.get('tags', [])) or 'None'}
+{f'- Extra context: {custom_context}' if custom_context else ''}
+
+Offer:
+- Product: LeadFlow AI
+- Description: AI-powered lead generation and CRM workflow for outbound teams
+
+Return ONLY JSON:
+{{
+  "emails": [
+    {{"sequence_label":"Intro","subject":"...","body":"..."}},
+    {{"sequence_label":"Follow-up","subject":"...","body":"..."}},
+    {{"sequence_label":"Value proof","subject":"...","body":"..."}},
+    {{"sequence_label":"Breakup","subject":"...","body":"..."}}
+  ]
+}}
+
+Rules:
+- 70-120 words per email
+- professional tone
+- first name only
+- no placeholders
+- no brackets
+- no made-up metrics
+- no generic hype
+- each email should have one specific CTA
+- the follow-up should reference the previous email lightly
+- the value proof email should use a credible, non-numeric proof point
+- the breakup email should be polite and low-pressure
+"""
+    data = _parse_json_response(_generate(prompt, json_mode=True))
+    return _coerce_sequence(data)
 
 
 async def generate_prospect_summary(lead: dict) -> str:

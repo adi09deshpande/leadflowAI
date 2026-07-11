@@ -76,6 +76,8 @@ export const api = {
   enrichLead: (id) => request(`/ai/enrich/${id}`, { method: 'POST' }),
   generateEmail: (id, params) => request(`/ai/email/${id}`, { method: 'POST', body: JSON.stringify(params) }),
   getEmailDraft: (id) => request(`/ai/email/${id}/draft`),
+  getEmailSequence: (id) => request(`/ai/email/${id}/sequence`),
+  generateEmailSequence: (id, params = {}) => request(`/ai/email/${id}/sequence`, { method: 'POST', body: JSON.stringify(params) }),
   sendEmail: (id, payload) => request(`/ai/email/${id}/send`, { method: 'POST', body: JSON.stringify(payload) }),
   generateSummary: (id) => request(`/ai/summary/${id}`, { method: 'POST' }),
   bulkEnrich: (ids) => request('/ai/bulk-enrich', { method: 'POST', body: JSON.stringify({ ids }) }),

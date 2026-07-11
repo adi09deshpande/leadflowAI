@@ -6,6 +6,7 @@ from app.api.auth import router as auth_router
 from app.api.leads import router as leads_router
 from app.api.ai import router as ai_router
 from app.api.stats import router as stats_router
+from app.api.webhooks import router as webhooks_router
 from app.core.auth import require_auth
 from app.core.database import DatabaseConfigurationError, get_db_client
 from app.core.settings import get_settings
@@ -34,6 +35,7 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth_router, prefix="/api")
+app.include_router(webhooks_router, prefix="/api")
 app.include_router(leads_router, prefix="/api", dependencies=[Depends(require_auth)])
 app.include_router(ai_router, prefix="/api", dependencies=[Depends(require_auth)])
 app.include_router(stats_router, prefix="/api", dependencies=[Depends(require_auth)])

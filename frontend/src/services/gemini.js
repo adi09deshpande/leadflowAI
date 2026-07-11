@@ -12,6 +12,14 @@ export async function getSavedEmailDraft(lead) {
   return api.getEmailDraft(lead.id)
 }
 
+export async function getSavedEmailSequence(lead) {
+  return api.getEmailSequence(lead.id)
+}
+
+export async function generateColdEmailSequence(lead, params = {}) {
+  return api.generateEmailSequence(lead.id, params)
+}
+
 export async function sendGeneratedEmail(lead, email) {
   return api.sendEmail(lead.id, {
     email_id: email.id,

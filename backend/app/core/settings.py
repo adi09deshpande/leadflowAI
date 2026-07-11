@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     resend_from_email: str = ""
     resend_reply_to: str = ""
+    resend_webhook_secret: str = ""
 
     supabase_url: str
     supabase_service_role_key: str

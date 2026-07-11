@@ -85,12 +85,29 @@ class LeadRepository:
             self.log_activity(lead["id"], "Imported", f"Imported lead {lead['name']}")
         return {"imported": len(created), "leads": self._annotate_leads_with_email_status(created)}
 
-    def save_generated_email(self, lead_id: str, subject: str, body: str, tone: str) -> dict[str, Any]:
-        existing_draft = self.get_latest_email_draft(lead_id)
+    def save_generated_email(
+        self,
+        lead_id: str,
+        subject: str,
+        body: str,
+        tone: str,
+        *,
+        sequence_step: int = 1,
+        sequence_label: str = "Intro",
+    ) -> dict[str, Any]:
+        existing_draft = self.get_latest_email_draft(lead_id, sequence_step=sequence_step)
         if existing_draft:
             response = (
                 self.client.table(self.emails_table)
-                .update({"subject": subject, "body": body, "tone": tone})
+                .update(
+                    {
+                        "subject": subject,
+                        "body": body,
+                        "tone": tone,
+                        "sequence_step": sequence_step,
+                        "sequence_label": sequence_label,
+                    }
+                )
                 .eq("id", existing_draft["id"])
                 .eq("lead_id", lead_id)
                 .eq("sent", False)
@@ -101,35 +118,88 @@ class LeadRepository:
                 self.log_activity(lead_id, "Email draft refreshed", subject)
                 return updated
 
-        response = self.client.table(self.emails_table).insert(
-            {"lead_id": lead_id, "subject": subject, "body": body, "tone": tone, "sent": False}
-        ).execute()
+        response = (
+            self.client.table(self.emails_table)
+            .insert(
+                {
+                    "lead_id": lead_id,
+                    "sequence_step": sequence_step,
+                    "sequence_label": sequence_label,
+                    "subject": subject,
+                    "body": body,
+                    "tone": tone,
+                    "provider_message_id": None,
+                    "sent": False,
+                }
+            )
+            .execute()
+        )
         created = (response.data or [None])[0]
         if not created:
             raise HTTPException(status_code=500, detail="Failed to save generated email")
         self.log_activity(lead_id, "Email generated", subject)
         return created
 
-    def get_latest_email_draft(self, lead_id: str) -> Optional[dict[str, Any]]:
+    def save_generated_sequence(self, lead_id: str, emails: list[dict[str, Any]], tone: str) -> list[dict[str, Any]]:
+        saved = []
+        for index, email in enumerate(emails, start=1):
+            saved.append(
+                self.save_generated_email(
+                    lead_id,
+                    email["subject"],
+                    email["body"],
+                    tone,
+                    sequence_step=email.get("sequence_step") or index,
+                    sequence_label=email.get("sequence_label") or self._default_sequence_label(index),
+                )
+            )
+        return saved
+
+    def get_latest_email_draft(self, lead_id: str, *, sequence_step: Optional[int] = None) -> Optional[dict[str, Any]]:
+        self.get_lead(lead_id)
+        query = self.client.table(self.emails_table).select("*").eq("lead_id", lead_id).eq("sent", False)
+        if sequence_step is not None:
+            query = query.eq("sequence_step", sequence_step)
+        response = query.order("created_at", desc=True).limit(1).execute()
+        return (response.data or [None])[0]
+
+    def get_email_sequence(self, lead_id: str) -> list[dict[str, Any]]:
         self.get_lead(lead_id)
         response = (
             self.client.table(self.emails_table)
             .select("*")
             .eq("lead_id", lead_id)
-            .eq("sent", False)
+            .order("sequence_step", desc=False)
             .order("created_at", desc=True)
-            .limit(1)
             .execute()
         )
-        return (response.data or [None])[0]
+        latest_by_step: dict[int, dict[str, Any]] = {}
+        for email in response.data or []:
+            step = int(email.get("sequence_step") or 1)
+            if step not in latest_by_step:
+                latest_by_step[step] = email
+        return [latest_by_step[step] for step in sorted(latest_by_step)]
 
     def mark_email_sent(
-        self, lead_id: str, *, email_id: Optional[str], subject: str, body: str, tone: str = "professional"
+        self,
+        lead_id: str,
+        *,
+        email_id: Optional[str],
+        subject: str,
+        body: str,
+        tone: str = "professional",
+        provider_message_id: Optional[str] = None,
     ) -> dict[str, Any]:
         if email_id:
             response = (
                 self.client.table(self.emails_table)
-                .update({"sent": True, "sent_at": datetime.utcnow().isoformat()})
+                .update(
+                    {
+                        "sent": True,
+                        "sent_at": datetime.utcnow().isoformat(),
+                        "provider_message_id": provider_message_id,
+                    }
+                )
                 .eq("id", email_id)
                 .eq("lead_id", lead_id)
                 .execute()
@@ -145,6 +215,7 @@ class LeadRepository:
                 "subject": subject,
                 "body": body,
                 "tone": tone,
+                "provider_message_id": provider_message_id,
                 "sent": True,
                 "sent_at": datetime.utcnow().isoformat(),
             }
@@ -154,6 +225,53 @@ class LeadRepository:
             raise HTTPException(status_code=500, detail="Failed to mark email as sent")
         self.log_activity(lead_id, "Email sent", created.get("subject", subject))
         return created
+
+    def update_email_tracking_by_provider_id(self, provider_message_id: str, updates: dict[str, bool]) -> Optional[dict[str, Any]]:
+        if not provider_message_id:
+            return None
+
+        response = (
+            self.client.table(self.emails_table)
+            .select("*")
+            .eq("provider_message_id", provider_message_id)
+            .limit(1)
+            .execute()
+        )
+        email = (response.data or [None])[0]
+        if not email:
+            return None
+
+        return self.update_email_tracking(email["lead_id"], email["id"], updates)
+
+    def update_email_tracking(self, lead_id: str, email_id: str, updates: dict[str, bool]) -> dict[str, Any]:
+        allowed = {"delivered"}
+        payload: dict[str, Any] = {}
+        now = datetime.utcnow().isoformat()
+        for key, value in updates.items():
+            if key not in allowed or value is None:
+                continue
+            payload[key] = value
+            payload[f"{key}_at"] = now if value else None
+            if key == "delivered" and value:
+                payload["sent"] = True
+
+        if not payload:
+            raise HTTPException(status_code=422, detail="No tracking fields were provided")
+
+        response = (
+            self.client.table(self.emails_table)
+            .update(payload)
+            .eq("id", email_id)
+            .eq("lead_id", lead_id)
+            .execute()
+        )
+        updated = (response.data or [None])[0]
+        if not updated:
+            raise HTTPException(status_code=404, detail="Email not found")
+
+        changed = ", ".join(key for key in updates.keys() if key in allowed)
+        self.log_activity(lead_id, "Email tracking updated", changed)
+        return updated
 
     def log_activity(self, lead_id: str, action: str, detail: str) -> None:
         self.client.table(self.activity_table).insert(
@@ -222,6 +340,7 @@ class LeadRepository:
         enriched_count = sum(1 for lead in leads if lead.get("enriched"))
         sent_emails = [email for email in emails if email.get("sent")]
         emails_sent = len(sent_emails)
+        delivered_emails = sum(1 for email in sent_emails if email.get("delivered"))
         closed_won = sum(1 for lead in leads if lead.get("status") == "closed_won")
 
         monthly_map: dict[str, dict[str, Any]] = {}
@@ -303,7 +422,12 @@ class LeadRepository:
                 "enrichment_rate": round(enriched_count / total_leads * 100, 1) if total_leads else 0,
                 "estimated_pipeline_value": qualified_count * 5000,
                 "conversion_rate": round(closed_won / total_leads * 100, 1) if total_leads else 0,
+                "delivery_rate": round(delivered_emails / emails_sent * 100, 1) if emails_sent else 0,
             },
+            "email_tracking": [
+                {"name": "Sent", "value": emails_sent},
+                {"name": "Delivered", "value": delivered_emails},
+            ],
             "monthly_trend": [monthly_map[key] for key in month_keys],
             "source_data": source_data,
             "funnel_data": funnel_data,
@@ -344,6 +468,15 @@ class LeadRepository:
         if not date_str:
             return None
         return datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
+
+    @staticmethod
+    def _default_sequence_label(step: int) -> str:
+        return {
+            1: "Intro",
+            2: "Follow-up",
+            3: "Value proof",
+            4: "Breakup",
+        }.get(step, "Follow-up")
 
     def _annotate_leads_with_email_status(self, leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not leads:

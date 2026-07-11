@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, Depends, HTTPException
 from ..models.schemas import EmailGenerateRequest, BulkEnrichRequest, AIGenerateRequest, EmailSendRequest
-from ..services.gemini_service import enrich_lead_with_ai, generate_cold_email, generate_prospect_summary
+from ..services.gemini_service import enrich_lead_with_ai, generate_cold_email, generate_email_sequence, generate_prospect_summary
 from ..services.email_service import send_email_via_resend
 from ..repositories.lead_repository import LeadRepository, get_repository
 
@@ -20,8 +20,9 @@ def _merge_enrichment_with_existing(lead: dict, enriched: dict) -> dict:
 
 
 async def _refresh_email_draft_for_enriched_lead(lead: dict, repository: LeadRepository) -> dict:
-    email = await generate_cold_email(lead)
-    return repository.save_generated_email(lead["id"], email["subject"], email["body"], "professional")
+    emails = await generate_email_sequence(lead)
+    saved = repository.save_generated_sequence(lead["id"], emails, "professional")
+    return saved[0]
 
 
 @router.post("/enrich/{lead_id}", response_model=dict)
@@ -37,6 +38,21 @@ async def enrich_lead(lead_id: str, repository: LeadRepository = Depends(get_rep
 @router.get("/email/{lead_id}/draft", response_model=dict | None)
 async def get_email_draft(lead_id: str, repository: LeadRepository = Depends(get_repository)):
     return repository.get_latest_email_draft(lead_id)
+
+
+@router.get("/email/{lead_id}/sequence", response_model=list[dict])
+async def get_email_sequence(lead_id: str, repository: LeadRepository = Depends(get_repository)):
+    sequence = repository.get_email_sequence(lead_id)
+    steps = {int(email.get("sequence_step") or 1) for email in sequence}
+    if {1, 2, 3, 4}.issubset(steps):
+        return sequence
+
+    lead = repository.get_lead(lead_id)
+    if not lead.get("enriched"):
+        return sequence
+
+    emails = await generate_email_sequence(lead)
+    return repository.save_generated_sequence(lead_id, emails, "professional")
 
 
 @router.post("/email/{lead_id}", response_model=dict)
@@ -59,6 +75,19 @@ async def generate_email(
     }
 
 
+@router.post("/email/{lead_id}/sequence", response_model=list[dict])
+async def generate_sequence(
+    lead_id: str,
+    params: EmailGenerateRequest = Body(default_factory=EmailGenerateRequest),
+    repository: LeadRepository = Depends(get_repository),
+):
+    lead = repository.get_lead(lead_id)
+    if not lead.get("enriched"):
+        raise HTTPException(status_code=409, detail="Enrich this lead before drafting an email sequence.")
+    emails = await generate_email_sequence(lead, custom_context=params.custom_context or "")
+    return repository.save_generated_sequence(lead_id, emails, "professional")
+
+
 @router.post("/email/{lead_id}/send", response_model=dict)
 async def send_email(
     lead_id: str, payload: EmailSendRequest, repository: LeadRepository = Depends(get_repository)
@@ -78,13 +107,17 @@ async def send_email(
         email_id=payload.email_id,
         subject=payload.subject,
         body=payload.body,
+        provider_message_id=provider_result.get("id"),
     )
     return {
         "id": sent_email.get("id"),
+        "sequence_step": sent_email.get("sequence_step", 1),
+        "sequence_label": sent_email.get("sequence_label", "Intro"),
         "subject": sent_email.get("subject", payload.subject),
         "body": sent_email.get("body", payload.body),
         "tone": sent_email.get("tone", "professional"),
         "sent": sent_email.get("sent", True),
+        "delivered": sent_email.get("delivered", False),
         "provider_id": provider_result.get("id"),
     }
 
