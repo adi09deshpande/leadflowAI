@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Body, Depends, HTTPException
-from ..models.schemas import EmailGenerateRequest, BulkEnrichRequest, AIGenerateRequest, EmailSendRequest
+from ..models.schemas import EmailGenerateRequest, BulkEnrichRequest, AIGenerateRequest, EmailScheduleRequest, EmailSendRequest
 from ..services.gemini_service import enrich_lead_with_ai, generate_cold_email, generate_email_sequence, generate_prospect_summary
 from ..services.email_service import send_email_via_resend
 from ..repositories.lead_repository import LeadRepository, get_repository
@@ -149,6 +149,16 @@ async def send_email(
         "delivered": sent_email.get("delivered", False),
         "provider_id": provider_result.get("id"),
     }
+
+
+@router.patch("/email/{lead_id}/{email_id}/schedule", response_model=dict)
+async def schedule_email(
+    lead_id: str,
+    email_id: str,
+    payload: EmailScheduleRequest,
+    repository: LeadRepository = Depends(get_repository),
+):
+    return repository.update_email_schedule(lead_id, email_id, payload.scheduled_at)
 
 
 @router.get("/email-config")

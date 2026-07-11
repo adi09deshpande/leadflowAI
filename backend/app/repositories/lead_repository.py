@@ -13,6 +13,8 @@ class LeadRepository:
         self.leads_table = settings.supabase_leads_table
         self.emails_table = settings.supabase_emails_table
         self.activity_table = settings.supabase_activity_table
+        self.tasks_table = settings.supabase_tasks_table
+        self.templates_table = settings.supabase_templates_table
 
     @property
     def client(self):
@@ -130,6 +132,7 @@ class LeadRepository:
                     "tone": tone,
                     "provider_message_id": None,
                     "sent": False,
+                    "schedule_status": "not_scheduled",
                 }
             )
             .execute()
@@ -198,6 +201,7 @@ class LeadRepository:
                         "sent": True,
                         "sent_at": datetime.utcnow().isoformat(),
                         "provider_message_id": provider_message_id,
+                        "schedule_status": "sent",
                     }
                 )
                 .eq("id", email_id)
@@ -218,6 +222,7 @@ class LeadRepository:
                 "provider_message_id": provider_message_id,
                 "sent": True,
                 "sent_at": datetime.utcnow().isoformat(),
+                "schedule_status": "sent",
             }
         ).execute()
         created = (response.data or [None])[0]
@@ -225,6 +230,26 @@ class LeadRepository:
             raise HTTPException(status_code=500, detail="Failed to mark email as sent")
         self.log_activity(lead_id, "Email sent", created.get("subject", subject))
         return created
+
+    def update_email_schedule(self, lead_id: str, email_id: str, scheduled_at: Optional[datetime]) -> dict[str, Any]:
+        payload = {
+            "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+            "schedule_status": "scheduled" if scheduled_at else "not_scheduled",
+        }
+        response = (
+            self.client.table(self.emails_table)
+            .update(payload)
+            .eq("id", email_id)
+            .eq("lead_id", lead_id)
+            .execute()
+        )
+        updated = (response.data or [None])[0]
+        if not updated:
+            raise HTTPException(status_code=404, detail="Email not found")
+
+        detail = f"Email {updated.get('sequence_step', '')} scheduled" if scheduled_at else "Email schedule cleared"
+        self.log_activity(lead_id, "Email schedule updated", detail)
+        return updated
 
     def update_email_tracking_by_provider_id(self, provider_message_id: str, updates: dict[str, bool]) -> Optional[dict[str, Any]]:
         if not provider_message_id:
@@ -277,6 +302,81 @@ class LeadRepository:
         self.client.table(self.activity_table).insert(
             {"lead_id": lead_id, "action": action, "detail": detail}
         ).execute()
+
+    def list_tasks(self, *, completed: Optional[bool] = None, lead_id: Optional[str] = None) -> list[dict[str, Any]]:
+        query = self.client.table(self.tasks_table).select("*")
+        if completed is not None:
+            query = query.eq("completed", completed)
+        if lead_id:
+            query = query.eq("lead_id", lead_id)
+        response = query.order("completed", desc=False).order("due_at", desc=False).execute()
+        return response.data or []
+
+    def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        lead = self.get_lead(payload["lead_id"])
+        response = self.client.table(self.tasks_table).insert(payload).execute()
+        created = (response.data or [None])[0]
+        if not created:
+            raise HTTPException(status_code=500, detail="Failed to create task")
+        self.log_activity(payload["lead_id"], "Task created", created.get("title", "Task"))
+        created["lead_name"] = lead.get("name")
+        created["lead_company"] = lead.get("company")
+        return created
+
+    def update_task(self, task_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        response = self.client.table(self.tasks_table).select("*").eq("id", task_id).limit(1).execute()
+        task = (response.data or [None])[0]
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        payload = dict(updates)
+        if "completed" in payload:
+            payload["completed_at"] = datetime.utcnow().isoformat() if payload["completed"] else None
+
+        response = self.client.table(self.tasks_table).update(payload).eq("id", task_id).execute()
+        updated = (response.data or [None])[0]
+        if not updated:
+            raise HTTPException(status_code=500, detail="Failed to update task")
+        self.log_activity(updated["lead_id"], "Task updated", updated.get("title", "Task"))
+        return updated
+
+    def delete_task(self, task_id: str) -> dict[str, str]:
+        response = self.client.table(self.tasks_table).select("*").eq("id", task_id).limit(1).execute()
+        task = (response.data or [None])[0]
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        self.client.table(self.tasks_table).delete().eq("id", task_id).execute()
+        self.log_activity(task["lead_id"], "Task deleted", task.get("title", "Task"))
+        return {"deleted": task_id}
+
+    def list_email_templates(self, *, category: Optional[str] = None) -> list[dict[str, Any]]:
+        query = self.client.table(self.templates_table).select("*")
+        if category and category != "all":
+            query = query.eq("category", category)
+        response = query.order("created_at", desc=True).execute()
+        return response.data or []
+
+    def create_email_template(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self.client.table(self.templates_table).insert(payload).execute()
+        created = (response.data or [None])[0]
+        if not created:
+            raise HTTPException(status_code=500, detail="Failed to create email template")
+        return created
+
+    def update_email_template(self, template_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        response = self.client.table(self.templates_table).update(updates).eq("id", template_id).execute()
+        updated = (response.data or [None])[0]
+        if not updated:
+            raise HTTPException(status_code=404, detail="Email template not found")
+        return updated
+
+    def delete_email_template(self, template_id: str) -> dict[str, str]:
+        response = self.client.table(self.templates_table).select("id").eq("id", template_id).limit(1).execute()
+        template = (response.data or [None])[0]
+        if not template:
+            raise HTTPException(status_code=404, detail="Email template not found")
+        self.client.table(self.templates_table).delete().eq("id", template_id).execute()
+        return {"deleted": template_id}
 
     def get_activity(self) -> list[dict[str, Any]]:
         response = (

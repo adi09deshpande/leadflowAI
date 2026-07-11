@@ -115,6 +115,10 @@ class EmailSendRequest(BaseModel):
     reply_to: Optional[str] = None
 
 
+class EmailScheduleRequest(BaseModel):
+    scheduled_at: Optional[datetime] = None
+
+
 class EnrichResponse(BaseModel):
     lead: Lead
     enriched_fields: List[str]
@@ -137,6 +141,44 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     username: str
+
+
+class TaskCreate(BaseModel):
+    lead_id: str
+    title: str
+    due_at: Optional[datetime] = None
+    task_type: str = "follow_up"
+    priority: str = "medium"
+    notes: Optional[str] = None
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    due_at: Optional[datetime] = None
+    task_type: Optional[str] = None
+    priority: Optional[str] = None
+    notes: Optional[str] = None
+    completed: Optional[bool] = None
+
+
+class EmailTemplateCreate(BaseModel):
+    name: str
+    category: str = "general"
+    description: Optional[str] = None
+    subject_guidance: Optional[str] = None
+    body_guidance: str
+    tone: str = "professional"
+    tags: List[str] = Field(default_factory=list)
+
+
+class EmailTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
+    subject_guidance: Optional[str] = None
+    body_guidance: Optional[str] = None
+    tone: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class StatsResponse(BaseModel):

@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Mail, Zap, BarChart3,
-  ChevronLeft, Sparkles, Import
+  ChevronLeft, Sparkles, Import, CalendarCheck, FileText
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import ThemeToggle from '../ui/ThemeToggle'
@@ -12,6 +12,8 @@ const NAV_ITEMS = [
   { path: '/leads', icon: Users, label: 'Leads', badge: null },
   { path: '/import', icon: Import, label: 'Import', badge: null },
   { path: '/email', icon: Mail, label: 'Email AI', badge: null },
+  { path: '/tasks', icon: CalendarCheck, label: 'Tasks', badge: null },
+  { path: '/templates', icon: FileText, label: 'Templates', badge: null },
   { path: '/enrich', icon: Zap, label: 'AI Enrich', badge: null },
   { path: '/analytics', icon: BarChart3, label: 'Analytics', badge: null },
 ]

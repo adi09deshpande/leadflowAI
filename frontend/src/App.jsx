@@ -10,6 +10,8 @@ import Import from './pages/Import'
 import Email from './pages/Email'
 import Enrich from './pages/Enrich'
 import Analytics from './pages/Analytics'
+import Tasks from './pages/Tasks'
+import Templates from './pages/Templates'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 import { ToastContainer } from './components/ui/Toast'
@@ -47,6 +49,8 @@ function AnimatedRoutes() {
           <Route path="/leads"     element={<Leads />} />
           <Route path="/import"    element={<Import />} />
           <Route path="/email"     element={<Email />} />
+          <Route path="/tasks"     element={<Tasks />} />
+          <Route path="/templates" element={<Templates />} />
           <Route path="/enrich"    element={<Enrich />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="*"           element={<NotFound />} />

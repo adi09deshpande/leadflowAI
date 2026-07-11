@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     supabase_leads_table: str = "leads"
     supabase_emails_table: str = "emails"
     supabase_activity_table: str = "activity"
+    supabase_tasks_table: str = "tasks"
+    supabase_templates_table: str = "email_templates"
 
     @property
     def cors_origins(self) -> List[str]:

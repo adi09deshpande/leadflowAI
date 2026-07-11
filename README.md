@@ -19,8 +19,10 @@ It supports:
 - automatically enriching CRM data with AI
 - generating intelligent prospect summaries
 - creating personalized four-step cold email sequences
+- saving reusable outreach templates for SaaS, agency, recruiting, and partnership workflows
+- scheduling follow-up steps in the outreach sequence
 - sending outreach through Resend with sent and delivered status tracking (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
-- managing leads through a smart dashboard with analytics and activity tracking
+- managing leads through a smart dashboard with analytics, task reminders, and activity tracking
 
 ## Overview
 
@@ -30,8 +32,11 @@ LeadFlow AI helps you:
 - import leads from CSV
 - score leads with rule-based logic
 - enrich leads with AI
+- save reusable outreach templates
 - generate four-step cold email sequences
+- schedule follow-up emails with a 0/2/5/9 day cadence
 - send sequence emails through Resend
+- create CRM task reminders for calls, research, proposals, meetings, and manual follow-ups
 - track lead activity, delivery status, and analytics
 
 The current app also includes a simple single-user login flow.
@@ -62,10 +67,10 @@ Process
     ->
   Gemini generates a personalized four-step outreach sequence
     ->
-  Backend stores sequence emails, send state, delivery state, and activity logs
+  Backend stores sequence emails, schedule state, send state, delivery state, task reminders, and activity logs
 
 Output
-  Smart CRM dashboard with enriched leads, summaries, outreach sequences, pipeline status, and analytics
+  Smart CRM dashboard with enriched leads, summaries, scheduled outreach, task reminders, pipeline status, and analytics
 ```
 
 ### System Architecture
@@ -85,6 +90,8 @@ Service Layer
 Supabase
   - leads
   - emails
+  - tasks
+  - email_templates
   - activity
 ```
 
@@ -95,10 +102,12 @@ Supabase
 3. The backend calculates a deterministic score from lead completeness, business email quality, decision-maker title signals, and company context.
 4. Gemini adds summary, tags, industry, company size, and revenue context.
 5. A personalized four-email sequence is generated automatically for enriched leads.
-6. Users review, regenerate, copy, and send each sequence step from the Email page.
-7. Sent status is stored immediately after Resend accepts an email.
-8. Delivered status is updated automatically through the Resend webhook (open, click, bounce, and complaint tracking require a verified custom domain and can be added later).
-9. Lead activity, email state, and dashboard metrics stay synced across the app.
+6. Users can choose a saved outreach template to guide the sequence angle.
+7. Users review, regenerate, copy, schedule, and send each sequence step from the Email page.
+8. Scheduled follow-ups are stored on each sequence email; the app tracks when a step is planned or due.
+9. Sent status is stored immediately after Resend accepts an email.
+10. Delivered status is updated automatically through the Resend webhook (open, click, bounce, and complaint tracking require a verified custom domain and can be added later).
+11. Lead activity, email state, task reminders, templates, and dashboard metrics stay synced across the app.
 
 ## Project Structure
 
@@ -155,12 +164,28 @@ leadflow-ai/
 
 - only enriched leads can have outreach sequences generated or sent
 - generated sequences contain four steps: intro, follow-up, value proof, and breakup
+- saved templates can guide the outreach angle before a sequence is generated
 - saved sequence emails are reused when available
 - automatic sequence repair only fills missing steps; it does not create replacement records for steps that already exist
 - manual sequence regeneration refreshes only unsent draft steps and preserves steps that were already sent
+- sequence steps can be scheduled individually or with a 0/2/5/9 day follow-up cadence
 - individual sequence emails can be sent through Resend
 - sent status is saved immediately after Resend accepts the email
 - delivered status is updated by the Resend webhook and appears in the Email page without a manual reload (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
+
+### Tasks and Reminders
+
+- create lead-specific tasks for calls, research, proposals, meetings, and manual follow-ups
+- assign due dates, priority, notes, and completion state
+- view open, completed, or all reminders from the Tasks page
+- task changes are logged to the activity feed
+
+### Email Template Library
+
+- save reusable templates for SaaS founder outreach, agency client outreach, recruiting outreach, partnership outreach, or custom categories
+- each template stores category, description, subject guidance, body guidance, tone, and tags
+- templates can be selected on the Email page before generating or regenerating a sequence
+- the Supabase schema seeds four starter templates if they do not already exist
 
 ### CRM Dashboard and Analytics
 
@@ -236,6 +261,8 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
 SUPABASE_LEADS_TABLE=leads
 SUPABASE_EMAILS_TABLE=emails
 SUPABASE_ACTIVITY_TABLE=activity
+SUPABASE_TASKS_TABLE=tasks
+SUPABASE_TEMPLATES_TABLE=email_templates
 
 RESEND_API_KEY=re_your_resend_api_key_here
 RESEND_FROM_EMAIL=LeadFlow AI <onboarding@yourdomain.com>
@@ -278,6 +305,8 @@ Important variables:
 - `SUPABASE_LEADS_TABLE`
 - `SUPABASE_EMAILS_TABLE`
 - `SUPABASE_ACTIVITY_TABLE`
+- `SUPABASE_TASKS_TABLE`
+- `SUPABASE_TEMPLATES_TABLE`
   Table names used by the backend.
 
 - `RESEND_API_KEY`
@@ -303,6 +332,8 @@ This schema creates:
 
 - `public.leads`
 - `public.emails`
+- `public.tasks`
+- `public.email_templates`
 - `public.activity`
 
 It also:
@@ -312,7 +343,11 @@ It also:
 - creates service-role-only policies
 - adds an `updated_at` trigger for leads
 - stores email sequence metadata with `sequence_step` and `sequence_label`
+- stores email scheduling metadata with `scheduled_at` and `schedule_status`
 - stores Resend delivery identifiers with `provider_message_id`
+- stores CRM reminders in `public.tasks`
+- stores reusable outreach templates in `public.email_templates`
+- seeds starter templates for SaaS founder, agency client, recruiting, and partnership outreach
 - tracks only `sent` and `delivered` email states
 - removes older open, click, reply, and bounce tracking columns if they exist from a previous setup
 
@@ -418,7 +453,11 @@ Frontend URL:
    - add leads manually
    - import leads from CSV
    - enrich leads with AI
+   - save reusable email templates
    - generate and send four-step email sequences
+   - apply templates when generating outreach
+   - schedule follow-up sequence steps
+   - create task reminders for manual sales work
    - send sequence emails and track sent/delivered status
    - view dashboard metrics and analytics
 
@@ -487,19 +526,50 @@ Optional CSV columns:
 4. A four-step email sequence is automatically prepared for that lead
 5. If the lead is enriched again later, existing sequence steps are reused and only missing steps are generated
 
+### Create and Apply Email Templates
+
+1. Go to the Templates page
+2. Create a reusable template for a SaaS, agency, recruiting, partnership, or custom outreach angle
+3. Add subject guidance, body guidance, tone, and tags
+4. Go to the Email page
+5. Select a template before generating or regenerating a sequence
+6. Gemini uses the selected template as guidance while still personalizing the sequence for the selected lead
+
 ### Generate and Send an Email Sequence
 
 1. Go to the Email page
 2. Select a lead
 3. If the lead is not enriched, enrich it first
-4. Review the generated sequence tabs:
+4. Optionally choose a saved template to guide the outreach angle
+5. Review the generated sequence tabs:
    - Email 1: Intro
    - Email 2: Follow-up
    - Email 3: Value proof
    - Email 4: Breakup
-5. Send the sequence step you want to test or use
-6. The Email page marks the message as sent after Resend accepts it
-7. The delivered badge updates automatically after Resend posts the delivered webhook event (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
+6. Send the sequence step you want to test or use
+7. The Email page marks the message as sent after Resend accepts it
+8. The delivered badge updates automatically after Resend posts the delivered webhook event (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
+
+### Schedule Follow-Up Emails
+
+1. Go to the Email page
+2. Select an enriched lead with a saved sequence
+3. Set a date/time for the active email step, or choose a sequence start date
+4. Apply the 0/2/5/9 day cadence to schedule unsent steps
+5. Use the Scheduled and Due badges to decide what to send next
+
+Note:
+
+- scheduling stores planned send times; it does not silently send emails in the background
+- sent sequence steps are preserved and are not rescheduled by the cadence button
+
+### Create Task Reminders
+
+1. Go to the Tasks page
+2. Select a lead
+3. Create a reminder for a call, research, proposal, meeting, follow-up, or other task
+4. Add a due date, priority, and optional notes
+5. Mark the task complete when the manual work is done
 
 Note:
 
@@ -514,16 +584,20 @@ If you are recording the 5-10 minute demo for the challenge, this is a strong fl
 2. Import a CSV file with sample leads.
 3. Open the Leads page and show unenriched vs enriched lead states.
 4. Trigger AI enrichment for a lead and explain the rule-based score, summary, and tags.
-5. Open the Email page and show the generated four-step cold email sequence.
-6. Show that sequence emails are saved, labeled, and tied to enriched leads.
-7. Send one email through Resend and show the sent/delivered badges.
-8. Walk through the Dashboard / Analytics view to show CRM visibility and delivery metrics.
-9. Briefly explain the architecture: React frontend, FastAPI backend, Gemini for AI, Supabase for persistence, Resend for delivery.
+5. Open the Templates page and show reusable outreach templates.
+6. Open the Email page, choose a template, and show the generated four-step cold email sequence.
+7. Show that sequence emails are saved, labeled, tied to enriched leads, and schedulable.
+8. Apply the follow-up cadence and point out scheduled/due badges.
+9. Create a task reminder for manual sales work.
+10. Send one email through Resend and show the sent/delivered badges.
+11. Walk through the Dashboard / Analytics view to show CRM visibility and delivery metrics.
+12. Briefly explain the architecture: React frontend, FastAPI backend, Gemini for AI, Supabase for persistence, Resend for delivery.
 
 ## Why This Matches the Challenge
 
 - It starts with lead ingestion, not just email generation.
 - It combines deterministic scoring with AI enrichment, summaries, and personalized outreach.
+- It adds CRM workflow depth through follow-up scheduling and task reminders.
 - It persists and manages leads inside a CRM workflow.
 - It provides clear input -> process -> output architecture for review.
 - It is implemented as a public GitHub project and is demo-ready.
@@ -543,12 +617,29 @@ Protected route groups:
 - `/api/stats`
 - `/api/activity`
 - `/api/analytics`
+- `/api/tasks`
+- `/api/templates`
 
 Useful email routes:
 
 - `GET /api/ai/email/{lead_id}/sequence`
 - `POST /api/ai/email/{lead_id}/sequence`
 - `POST /api/ai/email/{lead_id}/send`
+- `PATCH /api/ai/email/{lead_id}/{email_id}/schedule`
+
+Useful task routes:
+
+- `GET /api/tasks`
+- `POST /api/tasks`
+- `PATCH /api/tasks/{task_id}`
+- `DELETE /api/tasks/{task_id}`
+
+Useful template routes:
+
+- `GET /api/templates`
+- `POST /api/templates`
+- `PATCH /api/templates/{template_id}`
+- `DELETE /api/templates/{template_id}`
 
 Public webhook route:
 

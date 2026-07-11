@@ -79,8 +79,26 @@ export const api = {
   getEmailSequence: (id) => request(`/ai/email/${id}/sequence`),
   generateEmailSequence: (id, params = {}) => request(`/ai/email/${id}/sequence`, { method: 'POST', body: JSON.stringify(params) }),
   sendEmail: (id, payload) => request(`/ai/email/${id}/send`, { method: 'POST', body: JSON.stringify(payload) }),
+  scheduleEmail: (leadId, emailId, scheduledAt) => request(`/ai/email/${leadId}/${emailId}/schedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({ scheduled_at: scheduledAt || null }),
+  }),
   generateSummary: (id) => request(`/ai/summary/${id}`, { method: 'POST' }),
   bulkEnrich: (ids) => request('/ai/bulk-enrich', { method: 'POST', body: JSON.stringify({ ids }) }),
+  getTasks: (params = {}) => {
+    const query = new URLSearchParams(params).toString()
+    return request(`/tasks${query ? `?${query}` : ''}`)
+  },
+  createTask: (payload) => request('/tasks', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTask: (id, payload) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
+  getTemplates: (params = {}) => {
+    const query = new URLSearchParams(params).toString()
+    return request(`/templates${query ? `?${query}` : ''}`)
+  },
+  createTemplate: (payload) => request('/templates', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTemplate: (id, payload) => request(`/templates/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteTemplate: (id) => request(`/templates/${id}`, { method: 'DELETE' }),
   getStats: () => request('/stats'),
   getActivity: () => request('/activity'),
   getAnalytics: () => request('/analytics'),

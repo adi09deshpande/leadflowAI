@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Mail, Sparkles, Copy, Check, RefreshCw, Send, ChevronDown, User, AlertTriangle, Zap } from 'lucide-react'
+import { Mail, Sparkles, Copy, Check, RefreshCw, Send, ChevronDown, User, AlertTriangle, Zap, CalendarClock, Clock } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useLeads } from '../store/leads'
 import { enrichLead, generateColdEmailSequence, getSavedEmailSequence, sendGeneratedEmail } from '../services/gemini'
+import { api } from '../services/api'
 import { cn } from '../lib/utils'
 import Avatar from '../components/ui/Avatar'
 import { useToast } from '../components/ui/Toast'
@@ -20,6 +21,13 @@ const EMAIL_STATUSES = [
   { field: 'delivered', label: 'Delivered', icon: Check, activeClass: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300' },
 ]
 
+const CADENCE_OFFSETS = {
+  1: 0,
+  2: 2,
+  3: 5,
+  4: 9,
+}
+
 function hasCompleteSequence(emails) {
   const steps = new Set((emails || []).map((email) => Number(email.sequence_step || 1)))
   return SEQUENCE_STEPS.every((step) => steps.has(step.step))
@@ -27,6 +35,34 @@ function hasCompleteSequence(emails) {
 
 function getVisibleStatuses(email) {
   return EMAIL_STATUSES.filter((status) => Boolean(email?.[status.field]))
+}
+
+function toDatetimeLocal(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
+  return date.toISOString().slice(0, 16)
+}
+
+function toIsoDateTime(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function formatSchedule(value) {
+  if (!value) return 'Not scheduled'
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function isDue(email) {
+  return Boolean(email?.scheduled_at && !email.sent && new Date(email.scheduled_at) <= new Date())
 }
 
 export default function EmailPage() {
@@ -39,6 +75,11 @@ export default function EmailPage() {
   const [activeStep, setActiveStep] = useState(1)
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
+  const [scheduleSaving, setScheduleSaving] = useState(false)
+  const [scheduleValue, setScheduleValue] = useState('')
+  const [sequenceStartDate, setSequenceStartDate] = useState(() => toDatetimeLocal(new Date().toISOString()))
+  const [templates, setTemplates] = useState([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [loadingDraft, setLoadingDraft] = useState(false)
   const [enrichingLead, setEnrichingLead] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -51,6 +92,11 @@ export default function EmailPage() {
     : leads[0]?.id ?? null
   const activeLead = leads.find((lead) => lead.id === activeLeadId) || null
   const email = sequence.find((item) => Number(item.sequence_step || 1) === activeStep) || null
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) || null
+
+  useEffect(() => {
+    setScheduleValue(toDatetimeLocal(email?.scheduled_at))
+  }, [email?.id, email?.scheduled_at])
 
   function syncEmail(updatedEmail) {
     setSequence((current) => {
@@ -61,6 +107,19 @@ export default function EmailPage() {
         : [...current, updatedEmail]
       return next.sort((a, b) => Number(a.sequence_step || 1) - Number(b.sequence_step || 1))
     })
+  }
+
+  function selectedTemplateContext() {
+    if (!selectedTemplate) return ''
+    return [
+      `Use this saved outreach template: ${selectedTemplate.name}.`,
+      selectedTemplate.category ? `Template category: ${selectedTemplate.category}.` : '',
+      selectedTemplate.description ? `Template description: ${selectedTemplate.description}` : '',
+      selectedTemplate.subject_guidance ? `Subject guidance: ${selectedTemplate.subject_guidance}` : '',
+      `Body guidance: ${selectedTemplate.body_guidance}`,
+      selectedTemplate.tone ? `Tone: ${selectedTemplate.tone}` : '',
+      selectedTemplate.tags?.length ? `Template tags: ${selectedTemplate.tags.join(', ')}` : '',
+    ].filter(Boolean).join('\n')
   }
 
   useEffect(() => {
@@ -114,6 +173,22 @@ export default function EmailPage() {
   }, [activeLeadId, leads, toast])
 
   useEffect(() => {
+    let cancelled = false
+    async function loadTemplates() {
+      try {
+        const result = await api.getTemplates()
+        if (!cancelled) setTemplates(result || [])
+      } catch {
+        if (!cancelled) setTemplates([])
+      }
+    }
+    loadTemplates()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     if (!activeLead?.enriched) return
     const needsDeliveryRefresh = sequence.some((item) => item.sent && !item.delivered)
     if (!needsDeliveryRefresh) return
@@ -149,10 +224,10 @@ export default function EmailPage() {
     setGenerating(true)
     setSequence([])
     try {
-      const result = await generateColdEmailSequence(activeLead)
+      const result = await generateColdEmailSequence(activeLead, { custom_context: selectedTemplateContext() })
       setSequence(result)
       setActiveStep(1)
-      toast(`Email sequence generated for ${activeLead.name}`, 'ai')
+      toast(selectedTemplate ? `Sequence generated with ${selectedTemplate.name}` : `Email sequence generated for ${activeLead.name}`, 'ai')
     } catch (error) {
       toast(error.message || 'Failed to generate email', 'error')
     } finally {
@@ -207,6 +282,47 @@ export default function EmailPage() {
       toast(error.message || 'Failed to send email. Draft copied to clipboard.', 'error', 5000)
     } finally {
       setSending(false)
+    }
+  }
+
+  async function handleScheduleCurrent() {
+    if (!activeLead || !email?.id || scheduleSaving) return
+
+    setScheduleSaving(true)
+    try {
+      const updated = await api.scheduleEmail(activeLead.id, email.id, toIsoDateTime(scheduleValue))
+      syncEmail(updated)
+      toast(scheduleValue ? `Scheduled Email ${activeStep}` : `Cleared Email ${activeStep} schedule`, 'success')
+    } catch (error) {
+      toast(error.message || 'Failed to update schedule', 'error')
+    } finally {
+      setScheduleSaving(false)
+    }
+  }
+
+  async function handleApplyCadence() {
+    if (!activeLead || sequence.length === 0 || scheduleSaving) return
+    const base = new Date(sequenceStartDate)
+    if (Number.isNaN(base.getTime())) {
+      toast('Choose a valid start date first', 'error')
+      return
+    }
+
+    setScheduleSaving(true)
+    try {
+      const updates = await Promise.all(sequence.map((item) => {
+        if (item.sent || !item.id) return Promise.resolve(item)
+        const step = Number(item.sequence_step || 1)
+        const scheduled = new Date(base)
+        scheduled.setDate(base.getDate() + (CADENCE_OFFSETS[step] ?? 0))
+        return api.scheduleEmail(activeLead.id, item.id, scheduled.toISOString())
+      }))
+      setSequence(updates.sort((a, b) => Number(a.sequence_step || 1) - Number(b.sequence_step || 1)))
+      toast('Follow-up schedule applied to unsent emails', 'success')
+    } catch (error) {
+      toast(error.message || 'Failed to apply follow-up schedule', 'error')
+    } finally {
+      setScheduleSaving(false)
     }
   }
 
@@ -307,6 +423,39 @@ export default function EmailPage() {
             </div>
           </div>
 
+          <div className="glass-sm card-shadow rounded-2xl p-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">2. Choose Template</h3>
+            <select
+              value={selectedTemplateId}
+              onChange={(event) => setSelectedTemplateId(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[13px] text-slate-700 outline-none focus:ring-1 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+            >
+              <option value="">No template</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+            {selectedTemplate ? (
+              <div className="mt-3 rounded-xl border border-blue-200/60 bg-blue-50/70 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold capitalize text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
+                    {selectedTemplate.category}
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">{selectedTemplate.tone}</span>
+                </div>
+                <p className="mt-2 text-[12px] leading-relaxed text-slate-600 dark:text-slate-400">
+                  {selectedTemplate.body_guidance}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Templates guide Gemini's angle while still personalizing to the selected lead.
+              </p>
+            )}
+          </div>
+
           {!activeLead?.enriched && activeLead && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
               <div className="flex items-start gap-3">
@@ -402,6 +551,16 @@ export default function EmailPage() {
                             </span>
                           )) : (
                             <span className="text-[10px] text-slate-400">Draft</span>
+                          )}
+                          {stepEmail?.scheduled_at && !stepEmail?.sent && (
+                            <span className={cn(
+                              'rounded-full border px-1.5 py-0.5 text-[9px] font-semibold',
+                              isDue(stepEmail)
+                                ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
+                                : 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-300'
+                            )}>
+                              {isDue(stepEmail) ? 'Due' : 'Scheduled'}
+                            </span>
                           )}
                           {visibleStatuses.length > 3 && (
                             <span className="rounded-full border border-slate-200 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -522,6 +681,66 @@ export default function EmailPage() {
                           </span>
                         )
                       })}
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <CalendarClock size={14} className="text-blue-500" />
+                          <span className="text-[12px] font-semibold text-slate-700 dark:text-slate-300">Follow-up Schedule</span>
+                        </div>
+                        <span className={cn(
+                          'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                          isDue(email)
+                            ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
+                            : 'border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400'
+                        )}>
+                          <Clock size={10} />
+                          {isDue(email) ? 'Due now' : formatSchedule(email.scheduled_at)}
+                        </span>
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <input
+                          type="datetime-local"
+                          value={scheduleValue}
+                          onChange={(event) => setScheduleValue(event.target.value)}
+                          disabled={email.sent}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleScheduleCurrent}
+                            disabled={scheduleSaving || email.sent}
+                            className="rounded-xl bg-slate-900 px-3 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+                          >
+                            {scheduleSaving ? 'Saving...' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => setScheduleValue('')}
+                            disabled={scheduleSaving || email.sent}
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-semibold text-slate-600 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-3 dark:border-slate-700/70">
+                        <input
+                          type="datetime-local"
+                          value={sequenceStartDate}
+                          onChange={(event) => setSequenceStartDate(event.target.value)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700 outline-none focus:ring-1 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                        />
+                        <button
+                          onClick={handleApplyCadence}
+                          disabled={scheduleSaving}
+                          className="rounded-xl bg-blue-600 px-3 py-2 text-[12px] font-semibold text-white shadow-sm shadow-blue-500/20 transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Apply 0/2/5/9 day cadence
+                        </button>
+                      </div>
                     </div>
 
                     {/* Email body */}

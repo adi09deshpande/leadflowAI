@@ -10,6 +10,8 @@ const PAGE_TITLES = {
   '/leads': 'Leads',
   '/import': 'Import Leads',
   '/email': 'Email AI',
+  '/tasks': 'Tasks',
+  '/templates': 'Templates',
   '/enrich': 'AI Enrich',
   '/analytics': 'Analytics',
 }
