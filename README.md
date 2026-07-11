@@ -18,7 +18,7 @@ It supports:
 - automatically enriching CRM data with AI
 - generating intelligent prospect summaries
 - creating personalized four-step cold email sequences
-- sending outreach through Resend with sent and delivered status tracking
+- sending outreach through Resend with sent and delivered status tracking (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
 - managing leads through a smart dashboard with analytics and activity tracking
 
 ## Overview
@@ -91,7 +91,7 @@ Supabase
 4. A personalized four-email sequence is generated automatically for enriched leads.
 5. Users review, regenerate, copy, and send each sequence step from the Email page.
 6. Sent status is stored immediately after Resend accepts an email.
-7. Delivered status is updated automatically through the Resend webhook.
+7. Delivered status is updated automatically through the Resend webhook (open, click, bounce, and complaint tracking require a verified custom domain and can be added later).
 8. Lead activity, email state, and dashboard metrics stay synced across the app.
 
 ## Project Structure
@@ -148,7 +148,7 @@ leadflow-ai/
 - saved sequence emails are reused when available
 - individual sequence emails can be sent through Resend
 - sent status is saved immediately after Resend accepts the email
-- delivered status is updated by the Resend webhook and appears in the Email page without a manual reload
+- delivered status is updated by the Resend webhook and appears in the Email page without a manual reload (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
 
 ### CRM Dashboard and Analytics
 
@@ -486,7 +486,7 @@ Optional CSV columns:
    - Email 4: Breakup
 5. Send the sequence step you want to test or use
 6. The Email page marks the message as sent after Resend accepts it
-7. The delivered badge updates automatically after Resend posts the delivered webhook event
+7. The delivered badge updates automatically after Resend posts the delivered webhook event (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
 
 Note:
 
@@ -541,7 +541,7 @@ Public webhook route:
 
 - `POST /api/webhooks/resend`
 
-Configure this URL in Resend to automatically update delivered status. Subscribe only to the `email.delivered` event for the current app. In production, set `RESEND_WEBHOOK_SECRET` from the Resend webhook settings so the backend can verify webhook signatures.
+Configure this URL in Resend to automatically update delivered status. Subscribe only to the `email.delivered` event for the current app (open, click, bounce, and complaint tracking require a verified custom domain and can be added later). In production, set `RESEND_WEBHOOK_SECRET` from the Resend webhook settings so the backend can verify webhook signatures.
 
 For local testing, Resend cannot call `localhost:8000` directly. Run a tunnel such as:
 
