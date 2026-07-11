@@ -7,6 +7,39 @@ import google.generativeai as genai
 from ..core.settings import get_settings
 
 
+PERSONAL_EMAIL_DOMAINS = {
+    "gmail.com",
+    "yahoo.com",
+    "outlook.com",
+    "hotmail.com",
+    "icloud.com",
+    "aol.com",
+    "proton.me",
+    "protonmail.com",
+}
+
+DECISION_MAKER_KEYWORDS = (
+    "founder",
+    "co-founder",
+    "ceo",
+    "chief",
+    "owner",
+    "president",
+    "vp",
+    "vice president",
+    "director",
+    "head",
+    "manager",
+    "lead",
+    "growth",
+    "sales",
+    "marketing",
+    "revenue",
+    "business development",
+    "partnership",
+)
+
+
 @lru_cache
 def get_model():
     settings = get_settings()
@@ -101,13 +134,56 @@ def _parse_json_response(text: str) -> dict:
         raise HTTPException(status_code=502, detail=f"Gemini returned invalid JSON: {cleaned[:200]}") from exc
 
 
-def _coerce_enrichment(data: dict) -> dict:
-    score = data.get("score")
-    try:
-        score = max(0, min(100, int(score))) if score is not None else None
-    except (TypeError, ValueError):
-        score = None
+def _has_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return bool(normalized and normalized not in {"unknown", "n/a", "na", "none", "null"})
+    if isinstance(value, list):
+        return any(_has_value(item) for item in value)
+    return True
 
+
+def calculate_rule_based_score(lead: dict) -> int:
+    score = 0
+    email = str(lead.get("email") or "").strip().lower()
+    title = str(lead.get("title") or "").strip().lower()
+
+    if _has_value(lead.get("name")):
+        score += 5
+    if _has_value(email) and "@" in email:
+        score += 10
+        domain = email.rsplit("@", 1)[-1]
+        if domain and domain not in PERSONAL_EMAIL_DOMAINS:
+            score += 10
+    if _has_value(lead.get("company")):
+        score += 10
+    if _has_value(title):
+        score += 10
+        if any(keyword in title for keyword in DECISION_MAKER_KEYWORDS):
+            score += 20
+    if _has_value(lead.get("website")):
+        score += 10
+    if _has_value(lead.get("linkedin")):
+        score += 10
+    if _has_value(lead.get("industry")):
+        score += 10
+    if _has_value(lead.get("company_size")):
+        score += 10
+    if _has_value(lead.get("revenue")):
+        score += 5
+    if _has_value(lead.get("location")):
+        score += 5
+    if _has_value(lead.get("summary")):
+        score += 5
+    if _has_value(lead.get("tags")):
+        score += 5
+
+    return max(0, min(100, score))
+
+
+def _coerce_enrichment(data: dict) -> dict:
     tags = data.get("tags")
     if isinstance(tags, str):
         tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
@@ -117,7 +193,6 @@ def _coerce_enrichment(data: dict) -> dict:
         tags = []
 
     return {
-        "score": score,
         "summary": data.get("summary"),
         "industry": data.get("industry"),
         "company_size": data.get("company_size"),
@@ -192,7 +267,6 @@ Lead:
 
 Return ONLY a JSON object (no markdown, no explanation) with these fields:
 {{
-  "score": <integer 0-100>,
   "summary": "<2-3 sentence prospect summary>",
   "industry": "<industry>",
   "company_size": "<1-10|11-50|51-200|201-500|500+>",
@@ -201,6 +275,7 @@ Return ONLY a JSON object (no markdown, no explanation) with these fields:
 }}
 """
     data = _coerce_enrichment(_parse_json_response(_generate(prompt, json_mode=True)))
+    data["score"] = calculate_rule_based_score({**lead, **data})
     return {**lead, **data, "enriched": True}
 
 

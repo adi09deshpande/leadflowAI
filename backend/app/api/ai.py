@@ -9,7 +9,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 def _merge_enrichment_with_existing(lead: dict, enriched: dict) -> dict:
     return {
-        "score": lead.get("score") if lead.get("score") is not None else enriched.get("score"),
+        "score": enriched.get("score") if enriched.get("score") is not None else lead.get("score"),
         "summary": lead.get("summary") or enriched.get("summary"),
         "industry": lead.get("industry") or enriched.get("industry"),
         "company_size": lead.get("company_size") or enriched.get("company_size"),

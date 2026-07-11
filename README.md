@@ -15,6 +15,7 @@ LeadFlow AI matches the "AI lead generation" workflow challenge by covering the 
 It supports:
 
 - importing leads from CSV or manual entry
+- calculating lead scores with deterministic backend rules
 - automatically enriching CRM data with AI
 - generating intelligent prospect summaries
 - creating personalized four-step cold email sequences
@@ -27,6 +28,7 @@ LeadFlow AI helps you:
 
 - store and manage leads
 - import leads from CSV
+- score leads with rule-based logic
 - enrich leads with AI
 - generate four-step cold email sequences
 - send sequence emails through Resend
@@ -54,7 +56,9 @@ Process
     ->
   FastAPI backend validates and stores leads in Supabase
     ->
-  Gemini enriches the lead with score, summary, company context, and tags
+  Backend calculates a rule-based lead score
+    ->
+  Gemini enriches the lead with summary, company context, and tags
     ->
   Gemini generates a personalized four-step outreach sequence
     ->
@@ -72,6 +76,7 @@ React + Vite Frontend
 FastAPI API Layer
   ->
 Service Layer
+  - deterministic lead scoring
   - Gemini enrichment
   - Gemini prospect summaries
   - Gemini cold email sequence generation
@@ -87,12 +92,13 @@ Supabase
 
 1. A lead enters the system through CSV import or manual creation.
 2. The backend stores the lead and makes it available in the CRM dashboard.
-3. AI enrichment adds score, summary, tags, and company-related context.
-4. A personalized four-email sequence is generated automatically for enriched leads.
-5. Users review, regenerate, copy, and send each sequence step from the Email page.
-6. Sent status is stored immediately after Resend accepts an email.
-7. Delivered status is updated automatically through the Resend webhook (open, click, bounce, and complaint tracking require a verified custom domain and can be added later).
-8. Lead activity, email state, and dashboard metrics stay synced across the app.
+3. The backend calculates a deterministic score from lead completeness, business email quality, decision-maker title signals, and company context.
+4. Gemini adds summary, tags, industry, company size, and revenue context.
+5. A personalized four-email sequence is generated automatically for enriched leads.
+6. Users review, regenerate, copy, and send each sequence step from the Email page.
+7. Sent status is stored immediately after Resend accepts an email.
+8. Delivered status is updated automatically through the Resend webhook (open, click, bounce, and complaint tracking require a verified custom domain and can be added later).
+9. Lead activity, email state, and dashboard metrics stay synced across the app.
 
 ## Project Structure
 
@@ -137,7 +143,10 @@ leadflow-ai/
 
 ### AI Enrichment
 
-- enriches leads using Gemini
+- calculates lead scores with backend rules instead of relying on Gemini's judgment
+- scoring considers lead completeness, business email domain, title seniority, website, LinkedIn, industry, company size, revenue, location, summary, and tags
+- current scoring weights are: name +5, valid email +10, business email domain +10, company +10, title +10, decision-maker title +20, website +10, LinkedIn +10, industry +10, company size +10, revenue +5, location +5, summary +5, and tags +5, capped at 100
+- enriches lead context using Gemini
 - stores generated summaries and enrichment fields
 - prepares a four-step email sequence automatically when a lead is enriched
 
@@ -500,7 +509,7 @@ If you are recording the 5-10 minute demo for the challenge, this is a strong fl
 1. Show the project goal: AI-powered lead generation and CRM workflow.
 2. Import a CSV file with sample leads.
 3. Open the Leads page and show unenriched vs enriched lead states.
-4. Trigger AI enrichment for a lead and explain the score, summary, and tags.
+4. Trigger AI enrichment for a lead and explain the rule-based score, summary, and tags.
 5. Open the Email page and show the generated four-step cold email sequence.
 6. Show that sequence emails are saved, labeled, and tied to enriched leads.
 7. Send one email through Resend and show the sent/delivered badges.
@@ -510,7 +519,7 @@ If you are recording the 5-10 minute demo for the challenge, this is a strong fl
 ## Why This Matches the Challenge
 
 - It starts with lead ingestion, not just email generation.
-- It uses AI for enrichment, summaries, and personalized outreach.
+- It combines deterministic scoring with AI enrichment, summaries, and personalized outreach.
 - It persists and manages leads inside a CRM workflow.
 - It provides clear input -> process -> output architecture for review.
 - It is implemented as a public GitHub project and is demo-ready.
