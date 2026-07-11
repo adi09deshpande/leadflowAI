@@ -149,12 +149,15 @@ leadflow-ai/
 - enriches lead context using Gemini
 - stores generated summaries and enrichment fields
 - prepares a four-step email sequence automatically when a lead is enriched
+- re-enrichment reuses an existing complete email sequence and only generates missing sequence steps, so sent emails are not duplicated or overwritten
 
 ### Email Workflow
 
 - only enriched leads can have outreach sequences generated or sent
 - generated sequences contain four steps: intro, follow-up, value proof, and breakup
 - saved sequence emails are reused when available
+- automatic sequence repair only fills missing steps; it does not create replacement records for steps that already exist
+- manual sequence regeneration refreshes only unsent draft steps and preserves steps that were already sent
 - individual sequence emails can be sent through Resend
 - sent status is saved immediately after Resend accepts the email
 - delivered status is updated by the Resend webhook and appears in the Email page without a manual reload (open, click, bounce, and complaint tracking require a verified custom domain and can be added later)
@@ -482,6 +485,7 @@ Optional CSV columns:
 2. Trigger AI enrichment for a lead
 3. The backend stores enrichment data
 4. A four-step email sequence is automatically prepared for that lead
+5. If the lead is enriched again later, existing sequence steps are reused and only missing steps are generated
 
 ### Generate and Send an Email Sequence
 

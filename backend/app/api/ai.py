@@ -19,10 +19,28 @@ def _merge_enrichment_with_existing(lead: dict, enriched: dict) -> dict:
     }
 
 
-async def _refresh_email_draft_for_enriched_lead(lead: dict, repository: LeadRepository) -> dict:
+def _sequence_steps(sequence: list[dict]) -> set[int]:
+    return {int(email.get("sequence_step") or 1) for email in sequence}
+
+
+def _sort_sequence(sequence: list[dict]) -> list[dict]:
+    return sorted(sequence, key=lambda email: int(email.get("sequence_step") or 1))
+
+
+async def _ensure_email_sequence_for_enriched_lead(lead: dict, repository: LeadRepository) -> list[dict]:
+    existing_sequence = repository.get_email_sequence(lead["id"])
+    existing_steps = _sequence_steps(existing_sequence)
+    if {1, 2, 3, 4}.issubset(existing_steps):
+        return existing_sequence
+
     emails = await generate_email_sequence(lead)
-    saved = repository.save_generated_sequence(lead["id"], emails, "professional")
-    return saved[0]
+    missing_emails = [
+        email
+        for email in emails
+        if int(email.get("sequence_step") or 1) not in existing_steps
+    ]
+    saved = repository.save_generated_sequence(lead["id"], missing_emails, "professional") if missing_emails else []
+    return _sort_sequence([*existing_sequence, *saved])
 
 
 @router.post("/enrich/{lead_id}", response_model=dict)
@@ -30,7 +48,7 @@ async def enrich_lead(lead_id: str, repository: LeadRepository = Depends(get_rep
     lead = repository.get_lead(lead_id)
     enriched = await enrich_lead_with_ai(lead)
     updated_lead = repository.update_lead(lead_id, _merge_enrichment_with_existing(lead, enriched))
-    await _refresh_email_draft_for_enriched_lead(updated_lead, repository)
+    await _ensure_email_sequence_for_enriched_lead(updated_lead, repository)
     repository.log_activity(lead_id, "Enriched", f"AI enriched lead {lead.get('name')}")
     return updated_lead
 
@@ -43,16 +61,14 @@ async def get_email_draft(lead_id: str, repository: LeadRepository = Depends(get
 @router.get("/email/{lead_id}/sequence", response_model=list[dict])
 async def get_email_sequence(lead_id: str, repository: LeadRepository = Depends(get_repository)):
     sequence = repository.get_email_sequence(lead_id)
-    steps = {int(email.get("sequence_step") or 1) for email in sequence}
-    if {1, 2, 3, 4}.issubset(steps):
+    if {1, 2, 3, 4}.issubset(_sequence_steps(sequence)):
         return sequence
 
     lead = repository.get_lead(lead_id)
     if not lead.get("enriched"):
         return sequence
 
-    emails = await generate_email_sequence(lead)
-    return repository.save_generated_sequence(lead_id, emails, "professional")
+    return await _ensure_email_sequence_for_enriched_lead(lead, repository)
 
 
 @router.post("/email/{lead_id}", response_model=dict)
@@ -84,8 +100,21 @@ async def generate_sequence(
     lead = repository.get_lead(lead_id)
     if not lead.get("enriched"):
         raise HTTPException(status_code=409, detail="Enrich this lead before drafting an email sequence.")
+    existing_sequence = repository.get_email_sequence(lead_id)
+    existing_by_step = {int(email.get("sequence_step") or 1): email for email in existing_sequence}
+
     emails = await generate_email_sequence(lead, custom_context=params.custom_context or "")
-    return repository.save_generated_sequence(lead_id, emails, "professional")
+    regeneratable_emails = [
+        email
+        for email in emails
+        if not existing_by_step.get(int(email.get("sequence_step") or 1), {}).get("sent")
+    ]
+    saved = repository.save_generated_sequence(lead_id, regeneratable_emails, "professional") if regeneratable_emails else []
+
+    merged_by_step = {**existing_by_step}
+    for email in saved:
+        merged_by_step[int(email.get("sequence_step") or 1)] = email
+    return _sort_sequence(list(merged_by_step.values()))
 
 
 @router.post("/email/{lead_id}/send", response_model=dict)
@@ -150,7 +179,7 @@ async def bulk_enrich(body: BulkEnrichRequest, repository: LeadRepository = Depe
             lead = repository.get_lead(lead_id)
             enriched = await enrich_lead_with_ai(lead)
             updated_lead = repository.update_lead(lead_id, _merge_enrichment_with_existing(lead, enriched))
-            await _refresh_email_draft_for_enriched_lead(updated_lead, repository)
+            await _ensure_email_sequence_for_enriched_lead(updated_lead, repository)
             repository.log_activity(lead_id, "Enriched", f"Bulk AI enriched lead {lead.get('name')}")
             results.append({"id": lead_id, "status": "enriched"})
         except HTTPException:
